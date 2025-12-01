@@ -7,7 +7,43 @@ import java.util.UUID
 data class User(
     val id: String,
     val email: String,
-    val role: String
+    val role: String,
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val phoneNumber: String? = null,
+    val dateOfBirth: String? = null,
+    val location: String? = null,
+    val avatarUrl: String? = null,
+    val preferences: String = "{}"
+)
+
+@Serializable
+data class UserProfileResponse(
+    val id: String,
+    val email: String,
+    val role: String,
+    val firstName: String?,
+    val lastName: String?,
+    val phoneNumber: String?,
+    val dateOfBirth: String?,
+    val location: String?,
+    val avatarUrl: String?,
+    val preferences: String
+)
+
+@Serializable
+data class UpdateProfileRequest(
+    val firstName: String? = null,
+    val lastName: String? = null,
+    val phoneNumber: String? = null,
+    val dateOfBirth: String? = null,
+    val location: String? = null,
+    val avatarUrl: String? = null
+)
+
+@Serializable
+data class UpdatePreferencesRequest(
+    val preferences: String
 )
 
 @Serializable

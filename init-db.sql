@@ -7,6 +7,13 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT CHECK (role IN ('admin', 'user')) DEFAULT 'user',
+    first_name TEXT,
+    last_name TEXT,
+    phone_number TEXT,
+    date_of_birth DATE,
+    location TEXT,
+    avatar_url TEXT,
+    preferences JSONB DEFAULT '{}'::JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

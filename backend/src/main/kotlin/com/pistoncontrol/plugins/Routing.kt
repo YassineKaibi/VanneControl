@@ -2,6 +2,7 @@ package com.pistoncontrol.plugins
 
 import com.pistoncontrol.mqtt.MqttManager
 import com.pistoncontrol.services.DeviceMessageHandler
+import com.pistoncontrol.services.UserService
 import com.pistoncontrol.routes.*
 import com.pistoncontrol.websocket.WebSocketManager
 import io.ktor.http.*
@@ -35,24 +36,27 @@ fun Application.configureRouting(
     
     val wsManager = WebSocketManager(mqttManager)
     wsManager.startMqttForwarding()
-    
+
+    val userService = UserService()
+
     routing {
         get("/health") {
             call.respond(
-                HttpStatusCode.OK, 
+                HttpStatusCode.OK,
                 HealthResponse(
                     status = "healthy",
                     timestamp = System.currentTimeMillis()
                 )
             )
         }
-        
+
         head("/health") {
             call.respond(HttpStatusCode.OK)
         }
-        
+
         authRoutes(jwtSecret, jwtIssuer, jwtAudience)
         deviceRoutes(mqttManager)
+        userRoutes(userService)
         
         authenticate("auth-jwt") {
             get("/devices/{id}/stats") {

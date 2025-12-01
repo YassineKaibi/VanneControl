@@ -1,6 +1,7 @@
 package com.pistoncontrol.database
 
 import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.timestamp
 
 object Users : Table("users") {
@@ -8,9 +9,16 @@ object Users : Table("users") {
     val email = text("email")
     val passwordHash = text("password_hash")
     val role = text("role")
+    val firstName = text("first_name").nullable()
+    val lastName = text("last_name").nullable()
+    val phoneNumber = text("phone_number").nullable()
+    val dateOfBirth = date("date_of_birth").nullable()
+    val location = text("location").nullable()
+    val avatarUrl = text("avatar_url").nullable()
+    val preferences = jsonb("preferences").default("{}")
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
-    
+
     override val primaryKey = PrimaryKey(id)
 }
 
