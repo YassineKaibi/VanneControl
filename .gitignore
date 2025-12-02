@@ -34,10 +34,12 @@ backend/.gradle/
 backend/out/
 backend/*.jar
 backend/.kotlin/
+.gradle/
 
 # IDE
 .idea/
 .vscode/
+.claude/
 *.iml
 *.swp
 *.swo

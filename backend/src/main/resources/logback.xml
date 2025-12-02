@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Console appender -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Set Hikari to only show WARN and ERROR -->
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+
+    <!-- Set Quartz to only show WARN and ERROR -->
+    <logger name="org.quartz" level="WARN"/>
+
+    <!-- Set Exposed to only show WARN and ERROR -->
+    <logger name="Exposed" level="WARN"/>
+
+    <!-- Root logger level (INFO by default, adjust as needed) -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

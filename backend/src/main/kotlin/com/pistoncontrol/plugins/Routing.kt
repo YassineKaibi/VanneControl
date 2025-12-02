@@ -21,19 +21,16 @@ data class HealthResponse(
     val timestamp: Long
 )
 
-@Serializable
-data class ErrorResponse(
-    val error: String
-)
-
 fun Application.configureRouting(
     mqttManager: MqttManager,
-    messageHandler: DeviceMessageHandler
+    messageHandler: DeviceMessageHandler,
+    scheduleService: com.pistoncontrol.services.ScheduleService,
+    scheduleExecutor: com.pistoncontrol.services.ScheduleExecutor
 ) {
     val jwtSecret = environment.config.property("jwt.secret").getString()
     val jwtIssuer = environment.config.property("jwt.issuer").getString()
     val jwtAudience = environment.config.property("jwt.audience").getString()
-    
+
     val wsManager = WebSocketManager(mqttManager)
     wsManager.startMqttForwarding()
 
@@ -57,6 +54,7 @@ fun Application.configureRouting(
         authRoutes(jwtSecret, jwtIssuer, jwtAudience)
         deviceRoutes(mqttManager)
         userRoutes(userService)
+        scheduleRoutes(scheduleService, scheduleExecutor)
         
         authenticate("auth-jwt") {
             get("/devices/{id}/stats") {

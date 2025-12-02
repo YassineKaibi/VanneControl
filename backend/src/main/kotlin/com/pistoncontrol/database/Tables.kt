@@ -65,6 +65,21 @@ object AuthTokens : Table("auth_tokens") {
     val refreshToken = text("refresh_token")
     val expiresAt = timestamp("expires_at")
     val createdAt = timestamp("created_at")
-    
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+object Schedules : Table("schedules") {
+    val id = uuid("id").autoGenerate()
+    val name = text("name")
+    val deviceId = uuid("device_id")
+    val pistonNumber = integer("piston_number")
+    val action = text("action") // "ACTIVATE" or "DEACTIVATE"
+    val cronExpression = text("cron_expression")
+    val enabled = bool("enabled").default(true)
+    val userId = uuid("user_id")
+    val createdAt = timestamp("created_at")
+    val updatedAt = timestamp("updated_at")
+
     override val primaryKey = PrimaryKey(id)
 }

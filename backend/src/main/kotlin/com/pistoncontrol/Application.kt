@@ -52,28 +52,42 @@ fun Application.module() {
     // STEP 3: Initialize Device Message Handler
     // ════════════════════════════════════════════════════════════════
     val messageHandler = DeviceMessageHandler()
-    
+
     // Subscribe to MQTT message flow and process messages
     GlobalScope.launch {
         logger.info { "🔄 Starting MQTT message processor..." }
-        
+
         mqttManager.messageFlow.collect { message ->
             try {
                 // Process each message through our handler
                 messageHandler.handleMessage(message)
-                
-                logger.debug { 
-                    "Processed ${message.messageType} from ${message.deviceId}" 
+
+                logger.debug {
+                    "Processed ${message.messageType} from ${message.deviceId}"
                 }
             } catch (e: Exception) {
-                logger.error(e) { 
-                    "Error processing message from ${message.deviceId}" 
+                logger.error(e) {
+                    "Error processing message from ${message.deviceId}"
                 }
             }
         }
     }
-    
+
     logger.info { "✅ Device message handler initialized" }
+
+    // ════════════════════════════════════════════════════════════════
+    // STEP 3.5: Initialize Schedule Executor with Quartz
+    // ════════════════════════════════════════════════════════════════
+    val scheduleService = com.pistoncontrol.services.ScheduleService()
+    val scheduleExecutor = com.pistoncontrol.services.ScheduleExecutor(scheduleService, mqttManager)
+
+    try {
+        scheduleExecutor.setMqttManager(mqttManager)
+        scheduleExecutor.start()
+        logger.info { "✅ Schedule Executor started with Quartz" }
+    } catch (e: Exception) {
+        logger.error(e) { "❌ Failed to start Schedule Executor" }
+    }
     
     // ════════════════════════════════════════════════════════════════
     // STEP 4: Configure Ktor Plugins
@@ -89,16 +103,23 @@ fun Application.module() {
     
     configureMonitoring()
     logger.info { "✅ Request monitoring configured" }
-    
-    configureRouting(mqttManager, messageHandler)
+
+    configureRouting(mqttManager, messageHandler, scheduleService, scheduleExecutor)
     logger.info { "✅ REST API routes configured" }
-    
+
     // ════════════════════════════════════════════════════════════════
     // STEP 5: Graceful Shutdown Handler
     // ════════════════════════════════════════════════════════════════
     environment.monitor.subscribe(ApplicationStopped) {
         logger.info { "🛑 Shutting down gracefully..." }
-        
+
+        try {
+            scheduleExecutor.stop()
+            logger.info { "✅ Schedule Executor stopped" }
+        } catch (e: Exception) {
+            logger.error(e) { "Error stopping Schedule Executor" }
+        }
+
         try {
             mqttManager.disconnect()
             logger.info { "✅ MQTT disconnected" }
@@ -111,7 +132,7 @@ fun Application.module() {
     // STARTUP COMPLETE
     // ════════════════════════════════════════════════════════════════
     logger.info { """
-        
+
         ╔══════════════════════════════════════════════════════════╗
         ║                                                          ║
         ║           🔧 Piston Control Backend - READY              ║
@@ -121,8 +142,9 @@ fun Application.module() {
         ║                ✓ Real-time WebSocket Updates             ║
         ║                ✓ Secure JWT Authentication               ║
         ║                ✓ MQTT Device Communication               ║
+        ║                ✓ Scheduled Operations (Quartz)           ║
         ║                                                          ║
         ╚══════════════════════════════════════════════════════════╝
-        
+
     """.trimIndent() }
 }

@@ -48,7 +48,10 @@ dependencies {
     
     // MQTT Client
     implementation("org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5")
-    
+
+    // Quartz Scheduler
+    implementation("org.quartz-scheduler:quartz:2.3.2")
+
     // Logging
     implementation("ch.qos.logback:logback-classic:$logback_version")
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")

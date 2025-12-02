@@ -74,3 +74,35 @@ data class TelemetryEvent(
     val payload: String?,
     val createdAt: String
 )
+
+@Serializable
+data class Schedule(
+    val id: String,
+    val name: String,
+    val deviceId: String,
+    val pistonNumber: Int,
+    val action: String, // "ACTIVATE" or "DEACTIVATE"
+    val cronExpression: String,
+    val enabled: Boolean,
+    val userId: String,
+    val createdAt: String,
+    val updatedAt: String
+)
+
+@Serializable
+data class CreateScheduleRequest(
+    val name: String,
+    val deviceId: String,
+    val pistonNumber: Int,
+    val action: String,
+    val cronExpression: String,
+    val enabled: Boolean = true
+)
+
+@Serializable
+data class UpdateScheduleRequest(
+    val name: String? = null,
+    val action: String? = null,
+    val cronExpression: String? = null,
+    val enabled: Boolean? = null
+)
