@@ -58,6 +58,20 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Schedules table (for scheduled valve operations with Quartz)
+CREATE TABLE IF NOT EXISTS schedules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    device_id UUID NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    piston_number INT NOT NULL CHECK (piston_number >= 1 AND piston_number <= 8),
+    action TEXT NOT NULL CHECK (action IN ('ACTIVATE', 'DEACTIVATE')),
+    cron_expression TEXT NOT NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner_id);
 CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
@@ -67,6 +81,10 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_created ON telemetry(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_telemetry_event ON telemetry(event_type);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_schedules_device ON schedules(device_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_user ON schedules(user_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
+CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at DESC);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -82,6 +100,9 @@ CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_devices_updated_at BEFORE UPDATE ON devices
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_schedules_updated_at BEFORE UPDATE ON schedules
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- SECURITY: Default admin user removed for production security

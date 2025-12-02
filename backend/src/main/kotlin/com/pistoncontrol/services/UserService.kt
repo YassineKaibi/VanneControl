@@ -62,8 +62,10 @@ class UserService {
 
             logger.info { "Updated profile for user $userId" }
 
-            // Return updated user
-            getUserById(userId)
+            // Return updated user (refetch in same dbQuery block)
+            Users.select { Users.id eq userUuid }
+                .singleOrNull()
+                ?.let { rowToUserProfile(it) }
         }
     }
 
@@ -86,8 +88,10 @@ class UserService {
 
             logger.info { "Updated preferences for user $userId" }
 
-            // Return updated user
-            getUserById(userId)
+            // Return updated user (refetch in same dbQuery block)
+            Users.select { Users.id eq userUuid }
+                .singleOrNull()
+                ?.let { rowToUserProfile(it) }
         }
     }
 
