@@ -55,7 +55,7 @@ services:
       args:
         - BUILD_DATE=${BUILD_DATE:-now}
         - VCS_REF=${VCS_REF:-dev}
-    image: piston-backend:latest
+    image: zizyp/vannecontrol-backend:latest
     container_name: piston-backend
     restart: unless-stopped
     environment:
