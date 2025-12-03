@@ -36,7 +36,13 @@ dependencies {
     implementation("io.ktor:ktor-server-cors-jvm:$ktor_version")
     implementation("io.ktor:ktor-server-call-logging-jvm:$ktor_version")
     implementation("io.ktor:ktor-server-status-pages-jvm:$ktor_version")
-    
+
+    // Admin Web Dashboard
+    implementation("io.ktor:ktor-server-freemarker-jvm:$ktor_version")
+    implementation("io.ktor:ktor-server-sessions-jvm:$ktor_version")
+    implementation("io.ktor:ktor-server-partial-content-jvm:$ktor_version")
+    implementation("io.ktor:ktor-server-auto-head-response-jvm:$ktor_version")
+
     // Database
     implementation("org.jetbrains.exposed:exposed-json:$exposed_version")
     implementation("org.jetbrains.exposed:exposed-core:$exposed_version")

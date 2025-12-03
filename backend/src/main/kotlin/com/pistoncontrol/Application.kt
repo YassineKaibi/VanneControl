@@ -97,7 +97,17 @@ fun Application.module() {
     
     configureSecurity()
     logger.info { "✅ JWT authentication configured" }
-    
+
+    // Admin Web Dashboard plugins
+    configureTemplating()
+    logger.info { "✅ FreeMarker templating configured" }
+
+    configureSessions()
+    logger.info { "✅ Session management configured" }
+
+    configureStaticContent()
+    logger.info { "✅ Static content serving configured" }
+
     configureWebSockets()
     logger.info { "✅ WebSocket support configured" }
     

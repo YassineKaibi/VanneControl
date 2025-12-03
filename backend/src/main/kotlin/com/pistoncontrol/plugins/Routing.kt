@@ -56,6 +56,7 @@ fun Application.configureRouting(
         userRoutes(userService)
         scheduleRoutes(scheduleService, scheduleExecutor)
         adminRoutes()
+        adminWebRoutes()  // Admin web dashboard (HTML pages)
         
         authenticate("auth-jwt") {
             get("/devices/{id}/stats") {

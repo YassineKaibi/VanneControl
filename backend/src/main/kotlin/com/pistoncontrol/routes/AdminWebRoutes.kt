@@ -1,0 +1,365 @@
+package com.pistoncontrol.routes
+
+import com.pistoncontrol.plugins.AdminSession
+import com.pistoncontrol.services.AdminService
+import com.pistoncontrol.services.AuditLogService
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.freemarker.*
+import io.ktor.server.request.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
+import io.ktor.server.sessions.*
+import org.mindrot.jbcrypt.BCrypt
+import com.pistoncontrol.database.DatabaseFactory.dbQuery
+import com.pistoncontrol.database.Users
+import org.jetbrains.exposed.sql.select
+import java.util.UUID
+
+/**
+ * AdminWebRoutes - HTML rendering routes for the admin dashboard
+ *
+ * This file contains all web-based admin routes that serve HTML pages
+ * (as opposed to AdminRoutes.kt which serves JSON for mobile apps)
+ *
+ * Route Structure:
+ * - GET  /admin/login          → Login page (HTML form)
+ * - POST /admin/login          → Process login, create session
+ * - GET  /admin/logout         → Destroy session, redirect to login
+ * - GET  /admin/dashboard      → Main dashboard (stats overview)
+ * - GET  /admin/users          → User management table
+ * - GET  /admin/users/{id}     → User detail page
+ * - POST /admin/users/{id}/role → Update user role (form submission)
+ * - POST /admin/users/{id}/delete → Delete user (form submission)
+ * - GET  /admin/audit-logs     → Audit log viewer
+ *
+ * Authentication Strategy:
+ * - Public routes: /admin/login
+ * - Protected routes: Everything else (requires AdminSession)
+ */
+fun Route.adminWebRoutes() {
+    val auditLogService = AuditLogService()
+    val adminService = AdminService(auditLogService)
+
+    route("/admin") {
+        /**
+         * GET /admin/login
+         *
+         * Renders the admin login page with an HTML form
+         * If already logged in, redirects to dashboard
+         */
+        get("/login") {
+            val session = call.sessions.get<AdminSession>()
+
+            if (session != null) {
+                // Already logged in, redirect to dashboard
+                call.respondRedirect("/admin/dashboard")
+                return@get
+            }
+
+            // Render login page
+            call.respond(FreeMarkerContent("admin/login.ftl", mapOf(
+                "error" to call.request.queryParameters["error"]
+            )))
+        }
+
+        /**
+         * POST /admin/login
+         *
+         * Processes login form submission:
+         * 1. Validates credentials
+         * 2. Checks if user has admin role
+         * 3. Creates encrypted session cookie
+         * 4. Redirects to dashboard
+         *
+         * Form parameters:
+         * - email: Admin email address
+         * - password: Admin password
+         */
+        post("/login") {
+            val params = call.receiveParameters()
+            val email = params["email"]?.trim()
+            val password = params["password"]
+
+            // Validation
+            if (email.isNullOrBlank() || password.isNullOrBlank()) {
+                call.respondRedirect("/admin/login?error=missing_fields")
+                return@post
+            }
+
+            // Lookup user in database
+            val user = dbQuery {
+                Users.select { Users.email eq email }
+                    .singleOrNull()
+            }
+
+            if (user == null) {
+                call.respondRedirect("/admin/login?error=invalid_credentials")
+                return@post
+            }
+
+            // Check password
+            if (!BCrypt.checkpw(password, user[Users.passwordHash])) {
+                call.respondRedirect("/admin/login?error=invalid_credentials")
+                return@post
+            }
+
+            // Check admin role
+            if (user[Users.role] != "admin") {
+                call.respondRedirect("/admin/login?error=not_authorized")
+                return@post
+            }
+
+            // Create session
+            call.sessions.set(AdminSession(
+                userId = user[Users.id].toString(),
+                email = user[Users.email],
+                role = user[Users.role]
+            ))
+
+            // Log successful login
+            auditLogService.logAction(
+                userId = user[Users.id],
+                action = "ADMIN_WEB_LOGIN",
+                details = mapOf("method" to "web_form")
+            )
+
+            // Redirect to dashboard
+            call.respondRedirect("/admin/dashboard")
+        }
+
+        /**
+         * GET /admin/logout
+         *
+         * Destroys the admin session and redirects to login page
+         */
+        get("/logout") {
+            val session = call.sessions.get<AdminSession>()
+
+            if (session != null) {
+                // Log logout action
+                auditLogService.logAction(
+                    userId = UUID.fromString(session.userId),
+                    action = "ADMIN_WEB_LOGOUT"
+                )
+            }
+
+            call.sessions.clear<AdminSession>()
+            call.respondRedirect("/admin/login")
+        }
+
+        /**
+         * ALL routes below require authentication
+         * Middleware checks for valid session, redirects to login if missing
+         */
+        intercept(ApplicationCallPipeline.Call) {
+            val session = call.sessions.get<AdminSession>()
+
+            // Skip authentication check for login/logout pages and static content
+            if (call.request.path().startsWith("/admin/login") ||
+                call.request.path() == "/admin/logout" ||
+                call.request.path().startsWith("/admin/static")) {
+                return@intercept
+            }
+
+            if (session == null) {
+                call.respondRedirect("/admin/login")
+                finish()
+                return@intercept
+            }
+
+            // Session is valid, continue to route handler
+        }
+
+        /**
+         * GET /admin or GET /admin/
+         *
+         * Redirect root admin path to dashboard
+         */
+        get("") {
+            call.respondRedirect("/admin/dashboard")
+        }
+
+        get("/") {
+            call.respondRedirect("/admin/dashboard")
+        }
+
+        /**
+         * GET /admin/dashboard
+         *
+         * Main admin dashboard showing:
+         * - System statistics (user count, device count, etc.)
+         * - Recent activity
+         * - Quick links to management pages
+         */
+        get("/dashboard") {
+            val session = call.sessions.get<AdminSession>()!!
+
+            // Fetch dashboard data
+            val stats = adminService.getAdminStats(UUID.fromString(session.userId))
+
+            call.respond(FreeMarkerContent("admin/dashboard.ftl", mapOf(
+                "session" to session,
+                "stats" to stats,
+                "recentLogs" to stats.recentAuditLogs
+            )))
+        }
+
+        /**
+         * GET /admin/users
+         *
+         * User management page showing:
+         * - Paginated table of all users
+         * - Search/filter capabilities
+         * - Actions (edit role, delete)
+         *
+         * Query parameters:
+         * - page: Page number (default: 1)
+         * - limit: Results per page (default: 50)
+         */
+        get("/users") {
+            val session = call.sessions.get<AdminSession>()!!
+
+            val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+            val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 50
+            val offset = ((page - 1) * limit).toLong()
+
+            val users = adminService.getAllUsers(limit, offset)
+            val totalUsers = adminService.getUserCount()
+            val totalPages = ((totalUsers + limit - 1) / limit).toInt()
+
+            call.respond(FreeMarkerContent("admin/users.ftl", mapOf(
+                "session" to session,
+                "users" to users,
+                "currentPage" to page,
+                "totalPages" to totalPages,
+                "totalUsers" to totalUsers
+            )))
+        }
+
+        /**
+         * GET /admin/users/{id}
+         *
+         * Detailed user view showing:
+         * - Complete user profile
+         * - Devices owned by user
+         * - Recent activity
+         * - Edit options (role, delete)
+         */
+        get("/users/{id}") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@get call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+
+            val user = adminService.getUserById(userId)
+            if (user == null) {
+                call.respond(HttpStatusCode.NotFound, "User not found")
+                return@get
+            }
+
+            call.respond(FreeMarkerContent("admin/user-detail.ftl", mapOf(
+                "session" to session,
+                "user" to user,
+                "devices" to emptyList<Any>(),
+                "schedules" to emptyList<Any>()
+            )))
+        }
+
+        /**
+         * POST /admin/users/{id}/role
+         *
+         * Updates a user's role (admin form submission)
+         *
+         * Form parameters:
+         * - role: New role ("user" or "admin")
+         */
+        post("/users/{id}/role") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+
+            val params = call.receiveParameters()
+            val newRole = params["role"]
+
+            if (newRole.isNullOrBlank() || newRole !in listOf("user", "admin")) {
+                call.respondRedirect("/admin/users/$userId?error=invalid_role")
+                return@post
+            }
+
+            val result = adminService.updateUserRole(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId,
+                newRole = newRole
+            )
+
+            when (result) {
+                is AdminService.AdminResult.Success<*> -> {
+                    call.respondRedirect("/admin/users/$userId?success=role_updated")
+                }
+                is AdminService.AdminResult.Failure -> {
+                    call.respondRedirect("/admin/users/$userId?error=${result.error}")
+                }
+            }
+        }
+
+        /**
+         * POST /admin/users/{id}/delete
+         *
+         * Deletes a user (admin form submission)
+         * Redirects to users list after deletion
+         */
+        post("/users/{id}/delete") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+
+            val result = adminService.deleteUser(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId
+            )
+
+            when (result) {
+                is AdminService.AdminResult.Success<*> -> {
+                    call.respondRedirect("/admin/users?success=user_deleted")
+                }
+                is AdminService.AdminResult.Failure -> {
+                    call.respondRedirect("/admin/users?error=${result.error}")
+                }
+            }
+        }
+
+        /**
+         * GET /admin/audit-logs
+         *
+         * Audit log viewer showing:
+         * - Paginated list of all admin actions
+         * - Filtering by action type, user, date range
+         * - Detailed action information
+         *
+         * Query parameters:
+         * - page: Page number
+         * - limit: Results per page
+         * - action: Filter by action type
+         * - userId: Filter by user
+         */
+        get("/audit-logs") {
+            val session = call.sessions.get<AdminSession>()!!
+
+            val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+            val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
+            val offset = ((page - 1) * limit).toLong()
+
+            val logs = auditLogService.getAuditLogs(limit, offset)
+            val totalLogs = auditLogService.getAuditLogCount()
+            val totalPages = ((totalLogs + limit - 1) / limit).toInt()
+
+            call.respond(FreeMarkerContent("admin/audit-logs.ftl", mapOf(
+                "session" to session,
+                "logs" to logs,
+                "currentPage" to page,
+                "totalPages" to totalPages,
+                "totalLogs" to totalLogs
+            )))
+        }
+    }
+}
