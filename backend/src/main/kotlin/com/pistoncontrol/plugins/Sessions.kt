@@ -35,14 +35,16 @@ data class AdminSession(
  */
 fun Application.configureSessions() {
     // Capture environment config before entering the lambda
-    val secretEncryptKey = hex(environment.config.property("session.encryptKey").getString())
-    val secretSignKey = hex(environment.config.property("session.signKey").getString())
+    val secretSignKeyHex = environment.config.property("session.signKey").getString()
 
     install(Sessions) {
         // Cookie name: "admin_session"
         cookie<AdminSession>("admin_session") {
-            // Transform session data using encryption
-            transform(SessionTransportTransformerEncrypt(secretEncryptKey, secretSignKey))
+            // Sign cookies with HMAC to prevent tampering
+            // Since we're using HTTPS, we don't need additional encryption
+            transform(SessionTransportTransformerMessageAuthentication(
+                hex(secretSignKeyHex)
+            ))
 
             cookie.path = "/admin"  // Only send cookie for /admin/* routes
             cookie.maxAgeInSeconds = 8.hours.inWholeSeconds  // 8 hour expiration

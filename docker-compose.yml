@@ -65,6 +65,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}          # ← ADDED
       JWT_AUDIENCE: ${JWT_AUDIENCE}      # ← ADDED
+      SESSION_ENCRYPT_KEY: ${SESSION_ENCRYPT_KEY}
+      SESSION_SIGN_KEY: ${SESSION_SIGN_KEY}
       TZ: UTC
     ports:
       - "8080:8080"
