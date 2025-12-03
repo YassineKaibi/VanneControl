@@ -1,6 +1,7 @@
 package com.pistoncontrol.routes
 
 import com.pistoncontrol.models.CreateScheduleRequest
+import com.pistoncontrol.models.Schedule
 import com.pistoncontrol.models.UpdateScheduleRequest
 import com.pistoncontrol.services.ScheduleService
 import com.pistoncontrol.services.ScheduleExecutor
@@ -32,6 +33,44 @@ data class SchedulesListResponse(
     val schedules: List<ScheduleResponse>
 )
 
+/**
+ * Extension function to convert Schedule domain model to ScheduleResponse DTO
+ * Eliminates repetitive mapping code throughout routes
+ */
+fun Schedule.toResponse(): ScheduleResponse {
+    return ScheduleResponse(
+        id = this.id,
+        name = this.name,
+        deviceId = this.deviceId,
+        pistonNumber = this.pistonNumber,
+        action = this.action,
+        cronExpression = this.cronExpression,
+        enabled = this.enabled,
+        userId = this.userId,
+        createdAt = this.createdAt,
+        updatedAt = this.updatedAt
+    )
+}
+
+/**
+ * Extension function to convert list of Schedules to SchedulesListResponse
+ */
+fun List<Schedule>.toListResponse(): SchedulesListResponse {
+    return SchedulesListResponse(schedules = this.map { it.toResponse() })
+}
+
+/**
+ * ScheduleRoutes - HTTP Layer for Schedule Management Endpoints
+ *
+ * This file only handles HTTP concerns:
+ * - Request parsing (JSON deserialization)
+ * - Response formatting (JSON serialization)
+ * - HTTP status codes
+ * - Error handling
+ * - User authentication (JWT extraction)
+ *
+ * All business logic (validation, ownership checks) is delegated to ScheduleService
+ */
 fun Route.scheduleRoutes(
     scheduleService: ScheduleService,
     scheduleExecutor: ScheduleExecutor
@@ -42,6 +81,23 @@ fun Route.scheduleRoutes(
             /**
              * POST /schedules
              * Create a new schedule
+             *
+             * Request Body:
+             * {
+             *   "name": "Morning activation",
+             *   "deviceId": "uuid",
+             *   "pistonNumber": 1,
+             *   "action": "ACTIVATE",
+             *   "cronExpression": "0 0 8 * * ?",
+             *   "enabled": true
+             * }
+             *
+             * Success Response (201 Created):
+             * {
+             *   "id": "uuid",
+             *   "name": "Morning activation",
+             *   ...
+             * }
              */
             post {
                 try {
@@ -49,34 +105,26 @@ fun Route.scheduleRoutes(
                     val userId = principal.payload.getClaim("userId").asString()
                     val request = call.receive<CreateScheduleRequest>()
 
-                    // Validate action
-                    if (request.action !in listOf("ACTIVATE", "DEACTIVATE")) {
-                        return@post call.respond(
-                            HttpStatusCode.BadRequest,
-                            ErrorResponse("Invalid action. Must be ACTIVATE or DEACTIVATE")
-                        )
+                    // Delegate validation and creation to service
+                    when (val result = scheduleService.createSchedule(userId, request)) {
+                        is ScheduleService.ScheduleResult.Success -> {
+                            // Add to Quartz scheduler
+                            scheduleExecutor.addSchedule(result.schedule)
+                            call.respond(HttpStatusCode.Created, result.schedule.toResponse())
+                        }
+                        is ScheduleService.ScheduleResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
+                            )
+                        }
+                        else -> {
+                            call.respond(
+                                HttpStatusCode.InternalServerError,
+                                ErrorResponse("Unexpected result type")
+                            )
+                        }
                     }
-
-                    // Validate piston number
-                    if (request.pistonNumber < 1 || request.pistonNumber > 8) {
-                        return@post call.respond(
-                            HttpStatusCode.BadRequest,
-                            ErrorResponse("Invalid piston number. Must be between 1 and 8")
-                        )
-                    }
-
-                    val schedule = scheduleService.createSchedule(userId, request)
-                    if (schedule == null) {
-                        return@post call.respond(
-                            HttpStatusCode.BadRequest,
-                            ErrorResponse("Failed to create schedule. Check cron expression format.")
-                        )
-                    }
-
-                    // Add to Quartz scheduler
-                    scheduleExecutor.addSchedule(schedule)
-
-                    call.respond(HttpStatusCode.Created, schedule)
                 } catch (e: Exception) {
                     call.respond(
                         HttpStatusCode.InternalServerError,
@@ -88,29 +136,34 @@ fun Route.scheduleRoutes(
             /**
              * GET /schedules
              * Get all schedules for the current user
+             *
+             * Success Response (200 OK):
+             * {
+             *   "schedules": [...]
+             * }
              */
             get {
                 try {
                     val principal = call.principal<JWTPrincipal>()!!
                     val userId = principal.payload.getClaim("userId").asString()
 
-                    val schedules = scheduleService.getSchedulesByUser(userId)
-                    call.respond(HttpStatusCode.OK, SchedulesListResponse(
-                        schedules = schedules.map { schedule ->
-                            ScheduleResponse(
-                                id = schedule.id,
-                                name = schedule.name,
-                                deviceId = schedule.deviceId,
-                                pistonNumber = schedule.pistonNumber,
-                                action = schedule.action,
-                                cronExpression = schedule.cronExpression,
-                                enabled = schedule.enabled,
-                                userId = schedule.userId,
-                                createdAt = schedule.createdAt,
-                                updatedAt = schedule.updatedAt
+                    when (val result = scheduleService.getSchedulesByUser(userId)) {
+                        is ScheduleService.ScheduleResult.ListSuccess -> {
+                            call.respond(HttpStatusCode.OK, result.schedules.toListResponse())
+                        }
+                        is ScheduleService.ScheduleResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
                             )
                         }
-                    ))
+                        else -> {
+                            call.respond(
+                                HttpStatusCode.InternalServerError,
+                                ErrorResponse("Unexpected result type")
+                            )
+                        }
+                    }
                 } catch (e: Exception) {
                     call.respond(
                         HttpStatusCode.InternalServerError,
@@ -122,6 +175,13 @@ fun Route.scheduleRoutes(
             /**
              * GET /schedules/{id}
              * Get a specific schedule by ID
+             *
+             * Success Response (200 OK):
+             * {
+             *   "id": "uuid",
+             *   "name": "Morning activation",
+             *   ...
+             * }
              */
             get("/{id}") {
                 try {
@@ -132,23 +192,24 @@ fun Route.scheduleRoutes(
                         ErrorResponse("Missing schedule ID")
                     )
 
-                    val schedule = scheduleService.getScheduleById(scheduleId)
-                    if (schedule == null) {
-                        return@get call.respond(
-                            HttpStatusCode.NotFound,
-                            ErrorResponse("Schedule not found")
-                        )
+                    // Service handles ownership verification
+                    when (val result = scheduleService.getScheduleById(scheduleId, userId)) {
+                        is ScheduleService.ScheduleResult.Success -> {
+                            call.respond(HttpStatusCode.OK, result.schedule.toResponse())
+                        }
+                        is ScheduleService.ScheduleResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
+                            )
+                        }
+                        else -> {
+                            call.respond(
+                                HttpStatusCode.InternalServerError,
+                                ErrorResponse("Unexpected result type")
+                            )
+                        }
                     }
-
-                    // Verify ownership
-                    if (schedule.userId != userId) {
-                        return@get call.respond(
-                            HttpStatusCode.Forbidden,
-                            ErrorResponse("Access denied")
-                        )
-                    }
-
-                    call.respond(HttpStatusCode.OK, schedule)
                 } catch (e: Exception) {
                     call.respond(
                         HttpStatusCode.InternalServerError,
@@ -160,6 +221,11 @@ fun Route.scheduleRoutes(
             /**
              * GET /schedules/device/{deviceId}
              * Get all schedules for a specific device
+             *
+             * Success Response (200 OK):
+             * {
+             *   "schedules": [...]
+             * }
              */
             get("/device/{deviceId}") {
                 try {
@@ -168,23 +234,23 @@ fun Route.scheduleRoutes(
                         ErrorResponse("Missing device ID")
                     )
 
-                    val schedules = scheduleService.getSchedulesByDevice(deviceId)
-                    call.respond(HttpStatusCode.OK, SchedulesListResponse(
-                        schedules = schedules.map { schedule ->
-                            ScheduleResponse(
-                                id = schedule.id,
-                                name = schedule.name,
-                                deviceId = schedule.deviceId,
-                                pistonNumber = schedule.pistonNumber,
-                                action = schedule.action,
-                                cronExpression = schedule.cronExpression,
-                                enabled = schedule.enabled,
-                                userId = schedule.userId,
-                                createdAt = schedule.createdAt,
-                                updatedAt = schedule.updatedAt
+                    when (val result = scheduleService.getSchedulesByDevice(deviceId)) {
+                        is ScheduleService.ScheduleResult.ListSuccess -> {
+                            call.respond(HttpStatusCode.OK, result.schedules.toListResponse())
+                        }
+                        is ScheduleService.ScheduleResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
                             )
                         }
-                    ))
+                        else -> {
+                            call.respond(
+                                HttpStatusCode.InternalServerError,
+                                ErrorResponse("Unexpected result type")
+                            )
+                        }
+                    }
                 } catch (e: Exception) {
                     call.respond(
                         HttpStatusCode.InternalServerError,
@@ -196,6 +262,21 @@ fun Route.scheduleRoutes(
             /**
              * PUT /schedules/{id}
              * Update a schedule
+             *
+             * Request Body:
+             * {
+             *   "name": "Updated name",
+             *   "action": "DEACTIVATE",
+             *   "cronExpression": "0 0 20 * * ?",
+             *   "enabled": false
+             * }
+             *
+             * Success Response (200 OK):
+             * {
+             *   "id": "uuid",
+             *   "name": "Updated name",
+             *   ...
+             * }
              */
             put("/{id}") {
                 try {
@@ -207,26 +288,26 @@ fun Route.scheduleRoutes(
                     )
                     val request = call.receive<UpdateScheduleRequest>()
 
-                    // Validate action if provided
-                    if (request.action != null && request.action !in listOf("ACTIVATE", "DEACTIVATE")) {
-                        return@put call.respond(
-                            HttpStatusCode.BadRequest,
-                            ErrorResponse("Invalid action. Must be ACTIVATE or DEACTIVATE")
-                        )
+                    // Service handles validation and ownership verification
+                    when (val result = scheduleService.updateSchedule(scheduleId, userId, request)) {
+                        is ScheduleService.ScheduleResult.Success -> {
+                            // Update in Quartz scheduler
+                            scheduleExecutor.updateSchedule(result.schedule)
+                            call.respond(HttpStatusCode.OK, result.schedule.toResponse())
+                        }
+                        is ScheduleService.ScheduleResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
+                            )
+                        }
+                        else -> {
+                            call.respond(
+                                HttpStatusCode.InternalServerError,
+                                ErrorResponse("Unexpected result type")
+                            )
+                        }
                     }
-
-                    val updatedSchedule = scheduleService.updateSchedule(scheduleId, userId, request)
-                    if (updatedSchedule == null) {
-                        return@put call.respond(
-                            HttpStatusCode.NotFound,
-                            ErrorResponse("Schedule not found or invalid cron expression")
-                        )
-                    }
-
-                    // Update in Quartz scheduler
-                    scheduleExecutor.updateSchedule(updatedSchedule)
-
-                    call.respond(HttpStatusCode.OK, updatedSchedule)
                 } catch (e: Exception) {
                     call.respond(
                         HttpStatusCode.InternalServerError,
@@ -238,6 +319,11 @@ fun Route.scheduleRoutes(
             /**
              * DELETE /schedules/{id}
              * Delete a schedule
+             *
+             * Success Response (200 OK):
+             * {
+             *   "message": "Schedule deleted successfully"
+             * }
              */
             delete("/{id}") {
                 try {
@@ -248,21 +334,29 @@ fun Route.scheduleRoutes(
                         ErrorResponse("Missing schedule ID")
                     )
 
-                    val deleted = scheduleService.deleteSchedule(scheduleId, userId)
-                    if (!deleted) {
-                        return@delete call.respond(
-                            HttpStatusCode.NotFound,
-                            ErrorResponse("Schedule not found")
-                        )
+                    // Service handles ownership verification
+                    when (val result = scheduleService.deleteSchedule(scheduleId, userId)) {
+                        is ScheduleService.ScheduleResult.DeleteSuccess -> {
+                            // Remove from Quartz scheduler
+                            scheduleExecutor.removeSchedule(scheduleId)
+                            call.respond(
+                                HttpStatusCode.OK,
+                                mapOf("message" to result.message)
+                            )
+                        }
+                        is ScheduleService.ScheduleResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
+                            )
+                        }
+                        else -> {
+                            call.respond(
+                                HttpStatusCode.InternalServerError,
+                                ErrorResponse("Unexpected result type")
+                            )
+                        }
                     }
-
-                    // Remove from Quartz scheduler
-                    scheduleExecutor.removeSchedule(scheduleId)
-
-                    call.respond(
-                        HttpStatusCode.OK,
-                        mapOf("message" to "Schedule deleted successfully")
-                    )
                 } catch (e: Exception) {
                     call.respond(
                         HttpStatusCode.InternalServerError,

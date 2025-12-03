@@ -1,117 +1,127 @@
 package com.pistoncontrol.routes
 
-import com.pistoncontrol.database.DatabaseFactory.dbQuery
-import com.pistoncontrol.database.Users
-import com.auth0.jwt.JWT
-import com.auth0.jwt.algorithms.Algorithm
+import com.pistoncontrol.services.AuthService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import org.jetbrains.exposed.sql.*
-import org.mindrot.jbcrypt.BCrypt
-import java.util.UUID
-import java.util.Date
-import java.time.Instant
 
 /**
- * Validate password complexity
- * Returns null if valid, error message if invalid
+ * AuthRoutes - HTTP Layer for Authentication Endpoints
+ *
+ * This file only handles HTTP concerns:
+ * - Request parsing (JSON deserialization)
+ * - Response formatting (JSON serialization)
+ * - HTTP status codes
+ * - Error handling
+ *
+ * All business logic is delegated to AuthService
  */
-private fun validatePassword(password: String): String? {
-    if (password.length < 8) {
-        return "Password must be at least 8 characters"
-    }
-    if (!password.any { it.isDigit() }) {
-        return "Password must contain at least one digit"
-    }
-    if (!password.any { it.isUpperCase() }) {
-        return "Password must contain at least one uppercase letter"
-    }
-    if (!password.any { it.isLowerCase() }) {
-        return "Password must contain at least one lowercase letter"
-    }
-    // Optional: Add special character requirement
-    // if (!password.any { !it.isLetterOrDigit() }) {
-    //     return "Password must contain at least one special character"
-    // }
-    return null
-}
-
 fun Route.authRoutes(jwtSecret: String, jwtIssuer: String, jwtAudience: String) {
+    // Instantiate service with JWT configuration
+    val authService = AuthService(jwtSecret, jwtIssuer, jwtAudience)
+
     route("/auth") {
+        /**
+         * POST /auth/register
+         *
+         * Register a new user account
+         *
+         * Request Body:
+         * {
+         *   "email": "user@example.com",
+         *   "password": "SecurePass123"
+         * }
+         *
+         * Success Response (201 Created):
+         * {
+         *   "token": "eyJhbGci...",
+         *   "userId": "uuid"
+         * }
+         *
+         * Error Response (400 Bad Request / 409 Conflict):
+         * {
+         *   "error": "Error message"
+         * }
+         */
         post("/register") {
             try {
+                // Parse request body
                 val request = call.receive<RegisterRequest>()
 
-                if (!request.email.contains("@")) {
-                    return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid email"))
-                }
-
-                // Validate password complexity
-                val passwordError = validatePassword(request.password)
-                if (passwordError != null) {
-                    return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse(passwordError))
-                }
-                
-                val hashedPassword = BCrypt.hashpw(request.password, BCrypt.gensalt())
-                
-                val userId = dbQuery {
-                    val existingUser = Users.select { Users.email eq request.email }.singleOrNull()
-                    if (existingUser != null) {
-                        return@dbQuery null
+                // Delegate business logic to service
+                when (val result = authService.register(request.email, request.password)) {
+                    is AuthService.AuthResult.Success -> {
+                        call.respond(
+                            HttpStatusCode.Created,
+                            LoginResponse(result.token, result.userId)
+                        )
                     }
-                    
-                    Users.insert {
-                        it[Users.email] = request.email
-                        it[Users.passwordHash] = hashedPassword
-                        it[Users.role] = "user"
-                        it[Users.createdAt] = Instant.now()
-                        it[Users.updatedAt] = Instant.now()
-                    } get Users.id
+                    is AuthService.AuthResult.Failure -> {
+                        call.respond(
+                            HttpStatusCode.fromValue(result.statusCode),
+                            ErrorResponse(result.error)
+                        )
+                    }
                 }
-                
-                if (userId == null) {
-                    return@post call.respond(HttpStatusCode.Conflict, ErrorResponse("Email already registered"))
-                }
-                
-                val token = JWT.create()
-                    .withAudience(jwtAudience)
-                    .withIssuer(jwtIssuer)
-                    .withClaim("userId", userId.toString())
-                    .withExpiresAt(Date(System.currentTimeMillis() + 86400000))
-                    .sign(Algorithm.HMAC256(jwtSecret))
-                
-                call.respond(HttpStatusCode.Created, LoginResponse(token, userId.toString()))
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Registration failed: ${e.message}"))
+                // Handle unexpected errors
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    ErrorResponse("Registration failed: ${e.message}")
+                )
             }
         }
-        
+
+        /**
+         * POST /auth/login
+         *
+         * Authenticate user with email and password
+         *
+         * Request Body:
+         * {
+         *   "email": "user@example.com",
+         *   "password": "SecurePass123"
+         * }
+         *
+         * Success Response (200 OK):
+         * {
+         *   "token": "eyJhbGci...",
+         *   "userId": "uuid"
+         * }
+         *
+         * Error Response (401 Unauthorized):
+         * {
+         *   "error": "Invalid credentials"
+         * }
+         */
         post("/login") {
             try {
+                // Parse request body
                 val request = call.receive<LoginRequest>()
-                
-                val user = dbQuery {
-                    Users.select { Users.email eq request.email }.singleOrNull()
+
+                // Delegate business logic to service
+                when (val result = authService.login(request.email, request.password)) {
+                    is AuthService.AuthResult.Success -> {
+                        call.respond(
+                            HttpStatusCode.OK,
+                            LoginResponse(result.token, result.userId)
+                        )
+                    }
+                    is AuthService.AuthResult.Failure -> {
+                        call.respond(
+                            HttpStatusCode.fromValue(result.statusCode),
+                            ErrorResponse(result.error)
+                        )
+                    }
                 }
-                
-                if (user == null || !BCrypt.checkpw(request.password, user[Users.passwordHash])) {
-                    return@post call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Invalid credentials"))
-                }
-                
-                val userId = user[Users.id]
-                val token = JWT.create()
-                    .withAudience(jwtAudience)
-                    .withIssuer(jwtIssuer)
-                    .withClaim("userId", userId.toString())
-                    .withExpiresAt(Date(System.currentTimeMillis() + 86400000))
-                    .sign(Algorithm.HMAC256(jwtSecret))
-                
-                call.respond(HttpStatusCode.OK, LoginResponse(token, userId.toString()))
             } catch (e: Exception) {
-                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Login failed: ${e.message}"))
+                // Handle unexpected errors
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    ErrorResponse("Login failed: ${e.message}")
+                )
             }
         }
     }

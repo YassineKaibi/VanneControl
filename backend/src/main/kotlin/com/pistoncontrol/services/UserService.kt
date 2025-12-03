@@ -12,37 +12,85 @@ import java.util.UUID
 private val logger = KotlinLogging.logger {}
 
 /**
- * User Service
+ * UserService - Centralized User Profile Management Business Logic
  *
- * Handles user profile management operations
+ * This service handles all user profile-related operations including:
+ * - User profile retrieval
+ * - Profile details update with validation
+ * - Preferences management with JSON validation
+ *
+ * All methods return sealed UserResult types for type-safe error handling
  */
 class UserService {
 
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
     /**
-     * Get user profile by user ID
-     * Returns full profile including all optional fields
+     * Sealed class for type-safe user operation results
+     * Eliminates null checks and provides clear error states
      */
-    suspend fun getUserById(userId: String): UserProfileResponse? {
-        return dbQuery {
+    sealed class UserResult {
+        data class Success(val profile: UserProfileResponse) : UserResult()
+        data class Failure(val error: String, val statusCode: Int = 400) : UserResult()
+    }
+
+    /**
+     * Get user profile by user ID
+     *
+     * @param userId User's UUID
+     * @return UserResult.Success with profile, or Failure if not found
+     */
+    suspend fun getUserById(userId: String): UserResult {
+        val profile = dbQuery {
             Users.select { Users.id eq UUID.fromString(userId) }
                 .singleOrNull()
                 ?.let { rowToUserProfile(it) }
+        }
+
+        return if (profile != null) {
+            UserResult.Success(profile)
+        } else {
+            UserResult.Failure("User not found", statusCode = 404)
         }
     }
 
     /**
      * Update user profile details
-     * Only updates fields that are provided (non-null)
+     *
+     * Process:
+     * 1. Validate date format if provided
+     * 2. Check if user exists
+     * 3. Update only provided (non-null) fields
+     * 4. Return updated profile
+     *
+     * @param userId User's UUID
+     * @param request Update request with optional fields
+     * @return UserResult.Success with updated profile, or Failure with error
      */
-    suspend fun updateUserDetails(userId: String, request: UpdateProfileRequest): UserProfileResponse? {
-        return dbQuery {
+    suspend fun updateUserDetails(userId: String, request: UpdateProfileRequest): UserResult {
+        // Validate date format if provided
+        if (request.dateOfBirth != null) {
+            try {
+                LocalDate.parse(request.dateOfBirth, dateFormatter)
+            } catch (e: Exception) {
+                logger.warn { "Invalid date format for dateOfBirth: ${request.dateOfBirth}" }
+                return UserResult.Failure(
+                    "Invalid date format. Expected ISO format (YYYY-MM-DD)",
+                    statusCode = 400
+                )
+            }
+        }
+
+        val updatedProfile = dbQuery {
             val userUuid = UUID.fromString(userId)
 
             // Check if user exists
             val existingUser = Users.select { Users.id eq userUuid }
-                .singleOrNull() ?: return@dbQuery null
+                .singleOrNull()
+
+            if (existingUser == null) {
+                return@dbQuery null
+            }
 
             // Update only provided fields
             Users.update({ Users.id eq userUuid }) {
@@ -50,11 +98,7 @@ class UserService {
                 request.lastName?.let { value -> it[lastName] = value }
                 request.phoneNumber?.let { value -> it[phoneNumber] = value }
                 request.dateOfBirth?.let { value ->
-                    try {
-                        it[dateOfBirth] = LocalDate.parse(value, dateFormatter)
-                    } catch (e: Exception) {
-                        logger.warn { "Invalid date format for dateOfBirth: $value" }
-                    }
+                    it[dateOfBirth] = LocalDate.parse(value, dateFormatter)
                 }
                 request.location?.let { value -> it[location] = value }
                 request.avatarUrl?.let { value -> it[avatarUrl] = value }
@@ -67,19 +111,49 @@ class UserService {
                 .singleOrNull()
                 ?.let { rowToUserProfile(it) }
         }
+
+        return if (updatedProfile != null) {
+            UserResult.Success(updatedProfile)
+        } else {
+            UserResult.Failure("User not found", statusCode = 404)
+        }
     }
 
     /**
      * Update user preferences (JSONB field)
-     * Validates that preferences is valid JSON
+     *
+     * Process:
+     * 1. Validate JSON format
+     * 2. Check if user exists
+     * 3. Update preferences
+     * 4. Return updated profile
+     *
+     * @param userId User's UUID
+     * @param request Preferences update request with JSON string
+     * @return UserResult.Success with updated profile, or Failure with error
      */
-    suspend fun updateUserPreferences(userId: String, request: UpdatePreferencesRequest): UserProfileResponse? {
-        return dbQuery {
+    suspend fun updateUserPreferences(userId: String, request: UpdatePreferencesRequest): UserResult {
+        // Validate JSON format
+        try {
+            kotlinx.serialization.json.Json.parseToJsonElement(request.preferences)
+        } catch (e: Exception) {
+            logger.warn { "Invalid JSON format for preferences: ${e.message}" }
+            return UserResult.Failure(
+                "Invalid JSON format for preferences",
+                statusCode = 400
+            )
+        }
+
+        val updatedProfile = dbQuery {
             val userUuid = UUID.fromString(userId)
 
             // Check if user exists
             val existingUser = Users.select { Users.id eq userUuid }
-                .singleOrNull() ?: return@dbQuery null
+                .singleOrNull()
+
+            if (existingUser == null) {
+                return@dbQuery null
+            }
 
             // Update preferences
             Users.update({ Users.id eq userUuid }) {
@@ -92,6 +166,12 @@ class UserService {
             Users.select { Users.id eq userUuid }
                 .singleOrNull()
                 ?.let { rowToUserProfile(it) }
+        }
+
+        return if (updatedProfile != null) {
+            UserResult.Success(updatedProfile)
+        } else {
+            UserResult.Failure("User not found", statusCode = 404)
         }
     }
 

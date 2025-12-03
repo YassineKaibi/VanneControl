@@ -13,29 +13,78 @@ import java.util.UUID
 private val logger = KotlinLogging.logger {}
 
 /**
- * Schedule Service
+ * ScheduleService - Centralized Schedule Management Business Logic
  *
- * Handles CRUD operations for scheduled valve operations
+ * This service handles all schedule-related operations including:
+ * - Schedule CRUD operations
+ * - Validation (cron expressions, actions, piston numbers)
+ * - Ownership verification
+ * - Schedule state management
+ *
+ * All methods return sealed ScheduleResult types for type-safe error handling
  */
 class ScheduleService {
 
+    companion object {
+        private const val MIN_PISTON_NUMBER = 1
+        private const val MAX_PISTON_NUMBER = 8
+        private val VALID_ACTIONS = listOf("ACTIVATE", "DEACTIVATE")
+    }
+
+    /**
+     * Sealed class for type-safe schedule operation results
+     * Eliminates null checks and provides clear error states
+     */
+    sealed class ScheduleResult {
+        data class Success(val schedule: Schedule) : ScheduleResult()
+        data class ListSuccess(val schedules: List<Schedule>) : ScheduleResult()
+        data class DeleteSuccess(val message: String = "Schedule deleted successfully") : ScheduleResult()
+        data class Failure(val error: String, val statusCode: Int = 400) : ScheduleResult()
+    }
+
     /**
      * Create a new schedule
+     *
+     * Process:
+     * 1. Validate action (ACTIVATE/DEACTIVATE)
+     * 2. Validate piston number (1-8)
+     * 3. Validate cron expression format
+     * 4. Insert schedule into database
+     * 5. Return created schedule
+     *
+     * @param userId Owner's user ID
+     * @param request Schedule creation request
+     * @return ScheduleResult.Success with schedule, or Failure with error
      */
-    suspend fun createSchedule(userId: String, request: CreateScheduleRequest): Schedule? {
+    suspend fun createSchedule(userId: String, request: CreateScheduleRequest): ScheduleResult {
+        // Validate action
+        if (request.action !in VALID_ACTIONS) {
+            logger.warn { "Invalid action: ${request.action}" }
+            return ScheduleResult.Failure(
+                "Invalid action. Must be ACTIVATE or DEACTIVATE",
+                statusCode = 400
+            )
+        }
+
+        // Validate piston number
+        if (request.pistonNumber !in MIN_PISTON_NUMBER..MAX_PISTON_NUMBER) {
+            logger.warn { "Invalid piston number: ${request.pistonNumber}" }
+            return ScheduleResult.Failure(
+                "Invalid piston number. Must be between 1 and 8",
+                statusCode = 400
+            )
+        }
+
         // Validate cron expression
         if (!isValidCronExpression(request.cronExpression)) {
             logger.warn { "Invalid cron expression: ${request.cronExpression}" }
-            return null
+            return ScheduleResult.Failure(
+                "Invalid cron expression format",
+                statusCode = 400
+            )
         }
 
-        // Validate action
-        if (request.action !in listOf("ACTIVATE", "DEACTIVATE")) {
-            logger.warn { "Invalid action: ${request.action}" }
-            return null
-        }
-
-        return dbQuery {
+        val schedule = dbQuery {
             val now = Instant.now()
             val scheduleId = UUID.randomUUID()
 
@@ -58,38 +107,64 @@ class ScheduleService {
                 .singleOrNull()
                 ?.let { rowToSchedule(it) }
         }
+
+        return if (schedule != null) {
+            ScheduleResult.Success(schedule)
+        } else {
+            ScheduleResult.Failure("Failed to create schedule", statusCode = 500)
+        }
     }
 
     /**
      * Get all schedules for a user
+     *
+     * @param userId Owner's user ID
+     * @return ScheduleResult.ListSuccess with schedules
      */
-    suspend fun getSchedulesByUser(userId: String): List<Schedule> {
-        return dbQuery {
+    suspend fun getSchedulesByUser(userId: String): ScheduleResult {
+        val schedules = dbQuery {
             Schedules.select { Schedules.userId eq UUID.fromString(userId) }
                 .orderBy(Schedules.createdAt to SortOrder.DESC)
                 .map { rowToSchedule(it) }
         }
+        return ScheduleResult.ListSuccess(schedules)
     }
 
     /**
      * Get schedules for a specific device
+     *
+     * @param deviceId Device UUID
+     * @return ScheduleResult.ListSuccess with schedules
      */
-    suspend fun getSchedulesByDevice(deviceId: String): List<Schedule> {
-        return dbQuery {
+    suspend fun getSchedulesByDevice(deviceId: String): ScheduleResult {
+        val schedules = dbQuery {
             Schedules.select { Schedules.deviceId eq UUID.fromString(deviceId) }
                 .orderBy(Schedules.createdAt to SortOrder.DESC)
                 .map { rowToSchedule(it) }
         }
+        return ScheduleResult.ListSuccess(schedules)
     }
 
     /**
-     * Get a single schedule by ID
+     * Get a single schedule by ID with ownership verification
+     *
+     * @param scheduleId Schedule UUID
+     * @param userId Owner's user ID (for ownership verification)
+     * @return ScheduleResult.Success with schedule, or Failure if not found/not owned
      */
-    suspend fun getScheduleById(scheduleId: String): Schedule? {
-        return dbQuery {
-            Schedules.select { Schedules.id eq UUID.fromString(scheduleId) }
-                .singleOrNull()
+    suspend fun getScheduleById(scheduleId: String, userId: String): ScheduleResult {
+        val schedule = dbQuery {
+            Schedules.select {
+                (Schedules.id eq UUID.fromString(scheduleId)) and
+                (Schedules.userId eq UUID.fromString(userId))
+            }.singleOrNull()
                 ?.let { rowToSchedule(it) }
+        }
+
+        return if (schedule != null) {
+            ScheduleResult.Success(schedule)
+        } else {
+            ScheduleResult.Failure("Schedule not found", statusCode = 404)
         }
     }
 
@@ -104,29 +179,51 @@ class ScheduleService {
     }
 
     /**
-     * Update a schedule
+     * Update a schedule with ownership verification
+     *
+     * Process:
+     * 1. Validate action if provided (ACTIVATE/DEACTIVATE)
+     * 2. Validate cron expression if provided
+     * 3. Verify schedule exists and user owns it
+     * 4. Update schedule fields
+     * 5. Return updated schedule
+     *
+     * @param scheduleId Schedule UUID
+     * @param userId Owner's user ID (for ownership verification)
+     * @param request Update request with optional fields
+     * @return ScheduleResult.Success with updated schedule, or Failure with error
      */
-    suspend fun updateSchedule(scheduleId: String, userId: String, request: UpdateScheduleRequest): Schedule? {
+    suspend fun updateSchedule(scheduleId: String, userId: String, request: UpdateScheduleRequest): ScheduleResult {
+        // Validate action if provided
+        if (request.action != null && request.action !in VALID_ACTIONS) {
+            logger.warn { "Invalid action: ${request.action}" }
+            return ScheduleResult.Failure(
+                "Invalid action. Must be ACTIVATE or DEACTIVATE",
+                statusCode = 400
+            )
+        }
+
         // Validate cron expression if provided
         if (request.cronExpression != null && !isValidCronExpression(request.cronExpression)) {
             logger.warn { "Invalid cron expression: ${request.cronExpression}" }
-            return null
+            return ScheduleResult.Failure(
+                "Invalid cron expression format",
+                statusCode = 400
+            )
         }
 
-        // Validate action if provided
-        if (request.action != null && request.action !in listOf("ACTIVATE", "DEACTIVATE")) {
-            logger.warn { "Invalid action: ${request.action}" }
-            return null
-        }
-
-        return dbQuery {
+        val updatedSchedule = dbQuery {
             val scheduleUuid = UUID.fromString(scheduleId)
             val userUuid = UUID.fromString(userId)
 
             // Check if schedule exists and belongs to user
             val existingSchedule = Schedules.select {
                 (Schedules.id eq scheduleUuid) and (Schedules.userId eq userUuid)
-            }.singleOrNull() ?: return@dbQuery null
+            }.singleOrNull()
+
+            if (existingSchedule == null) {
+                return@dbQuery null
+            }
 
             // Update schedule
             Schedules.update({ Schedules.id eq scheduleUuid }) {
@@ -144,20 +241,39 @@ class ScheduleService {
                 .singleOrNull()
                 ?.let { rowToSchedule(it) }
         }
+
+        return if (updatedSchedule != null) {
+            ScheduleResult.Success(updatedSchedule)
+        } else {
+            ScheduleResult.Failure("Schedule not found", statusCode = 404)
+        }
     }
 
     /**
-     * Delete a schedule
+     * Delete a schedule with ownership verification
+     *
+     * Process:
+     * 1. Verify schedule exists and user owns it
+     * 2. Delete schedule from database
+     * 3. Return success or failure
+     *
+     * @param scheduleId Schedule UUID
+     * @param userId Owner's user ID (for ownership verification)
+     * @return ScheduleResult.DeleteSuccess or Failure if not found
      */
-    suspend fun deleteSchedule(scheduleId: String, userId: String): Boolean {
-        return dbQuery {
+    suspend fun deleteSchedule(scheduleId: String, userId: String): ScheduleResult {
+        val deleted = dbQuery {
             val scheduleUuid = UUID.fromString(scheduleId)
             val userUuid = UUID.fromString(userId)
 
             // Check if schedule exists and belongs to user
             val existingSchedule = Schedules.select {
                 (Schedules.id eq scheduleUuid) and (Schedules.userId eq userUuid)
-            }.singleOrNull() ?: return@dbQuery false
+            }.singleOrNull()
+
+            if (existingSchedule == null) {
+                return@dbQuery false
+            }
 
             val deletedCount = Schedules.deleteWhere {
                 Schedules.id eq scheduleUuid and (Schedules.userId eq userUuid)
@@ -169,6 +285,12 @@ class ScheduleService {
             } else {
                 false
             }
+        }
+
+        return if (deleted) {
+            ScheduleResult.DeleteSuccess()
+        } else {
+            ScheduleResult.Failure("Schedule not found", statusCode = 404)
         }
     }
 
