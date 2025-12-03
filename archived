@@ -2,15 +2,15 @@
 set -e
 
 ################################################################################
-# Piston Control System - Security Initialization Script
+# Piston Control System - Complete Security Initialization Script
 ################################################################################
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
-BLUE='\033[0;34m'
 NC='\033[0m'
 
+# Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Organization info for certificates
@@ -20,12 +20,11 @@ CITY="Sfax"
 ORG="Tesla Energie"
 OU="IoT"
 
-echo -e "${BLUE}🔐 Piston Control System Security Initialization${NC}"
+echo -e "${CYAN}🔐 Piston Control System Security Initialization${NC}"
 
 ################################################################################
 # STEP 1: Generate Passwords and Secrets
 ################################################################################
-echo -e "${CYAN}[1/6]${NC} Generating passwords and secrets..."
 POSTGRES_PASSWORD=$(openssl rand -hex 32)
 JWT_SECRET=$(openssl rand -base64 96 | tr -d "=+/" | cut -c1-128)
 JWT_ISSUER="piston-control"
@@ -36,12 +35,10 @@ SESSION_SIGN_KEY=$(openssl rand -hex 32)
 MQTT_PASSWORD=$(openssl rand -hex 32)
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo "main")
-echo -e "  ${GREEN}✓${NC} Secrets generated"
 
 ################################################################################
-# STEP 2: Create .env File
+# STEP 2: Create .env File (Docker-readable)
 ################################################################################
-echo -e "${CYAN}[2/6]${NC} Creating .env file..."
 tee "${SCRIPT_DIR}/.env" > /dev/null <<EOF
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 JWT_SECRET=${JWT_SECRET}
@@ -55,23 +52,35 @@ BUILD_DATE=${BUILD_DATE}
 VCS_REF=${VCS_REF}
 EOF
 chmod 644 "${SCRIPT_DIR}/.env"
-echo -e "  ${GREEN}✓${NC} .env created (644)"
 
 ################################################################################
-# STEP 3: Generate MQTT TLS Certificates
+# STEP 3: Create certs directories and .gitkeep
 ################################################################################
-echo -e "${CYAN}[3/6]${NC} Generating MQTT TLS certificates..."
 CERTS_DIR="${SCRIPT_DIR}/certs"
-mkdir -p "${CERTS_DIR}"
-touch "${CERTS_DIR}/.gitkeep" 2>/dev/null || true
-CERT_DAYS=3650
+NGINX_SSL_DIR="${SCRIPT_DIR}/nginx/ssl"
+MOSQUITTO_CONFIG_DIR="${SCRIPT_DIR}/mosquitto/config"
+
+mkdir -p "${CERTS_DIR}" "${NGINX_SSL_DIR}" "${MOSQUITTO_CONFIG_DIR}"
+
+# Create .gitkeep files and make them Git-readable
+for dir in "${CERTS_DIR}" "${NGINX_SSL_DIR}" "${MOSQUITTO_CONFIG_DIR}"; do
+    touch "${dir}/.gitkeep"
+    chown azureuser:azureuser "${dir}/.gitkeep"
+    chmod 644 "${dir}/.gitkeep"
+done
+
+################################################################################
+# STEP 4: Generate MQTT TLS Certificates (secure)
+################################################################################
 cd "${CERTS_DIR}"
+CERT_DAYS=3650
 
 # CA
 openssl req -new -x509 -days ${CERT_DAYS} -extensions v3_ca \
     -keyout ca.key -out ca.crt \
     -subj "/C=${COUNTRY}/ST=${STATE}/L=${CITY}/O=${ORG}/OU=${OU}/CN=Piston-CA" \
     -nodes >/dev/null 2>&1
+chmod 600 ca.key ca.crt
 
 # Server certificate
 openssl genrsa -out server.key 2048 >/dev/null 2>&1
@@ -79,54 +88,40 @@ openssl req -new -key server.key -out server.csr \
     -subj "/C=${COUNTRY}/ST=${STATE}/L=${CITY}/O=${ORG}/OU=${OU}/CN=mosquitto" >/dev/null 2>&1
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key \
     -CAcreateserial -out server.crt -days ${CERT_DAYS} >/dev/null 2>&1
+chmod 600 server.key server.crt
 rm -f server.csr ca.srl
-
-chmod 644 ca.crt server.crt
-chmod 600 ca.key server.key
 
 cd "${SCRIPT_DIR}"
 
 ################################################################################
-# STEP 4: Generate Nginx SSL Certificates
+# STEP 5: Generate Nginx SSL Certificates
 ################################################################################
-echo -e "${CYAN}[4/6]${NC} Generating Nginx SSL certificates..."
-NGINX_SSL_DIR="${SCRIPT_DIR}/nginx/ssl"
-mkdir -p "${NGINX_SSL_DIR}"
-touch "${NGINX_SSL_DIR}/.gitkeep" 2>/dev/null || true
 cd "${NGINX_SSL_DIR}"
-
 openssl req -x509 -nodes -days ${CERT_DAYS} -newkey rsa:4096 \
     -keyout key.pem -out cert.pem \
     -subj "/C=${COUNTRY}/ST=${STATE}/L=${CITY}/O=${ORG}/OU=${OU}/CN=localhost" >/dev/null 2>&1
-
-chmod 644 cert.pem
-chmod 600 key.pem
+chmod 600 key.pem cert.pem
 cd "${SCRIPT_DIR}"
 
 ################################################################################
-# STEP 5: MQTT Password File
+# STEP 6: MQTT password file
 ################################################################################
-echo -e "${CYAN}[5/6]${NC} Creating MQTT password file..."
-MOSQUITTO_DIR="${SCRIPT_DIR}/mosquitto"
-mkdir -p "${MOSQUITTO_DIR}/config" "${MOSQUITTO_DIR}/data" "${MOSQUITTO_DIR}/log"
-touch "${MOSQUITTO_DIR}/config/.gitkeep" 2>/dev/null || true
-
-PASSWD_FILE="${MOSQUITTO_DIR}/config/passwd"
+PASSWD_FILE="${MOSQUITTO_CONFIG_DIR}/passwd"
 tee "${PASSWD_FILE}" > /dev/null <<EOF
 # MQTT password file template
 EOF
 chmod 600 "${PASSWD_FILE}"
 
-# Ensure mosquitto.conf is readable by host and Git
-if [ -f "${MOSQUITTO_DIR}/config/mosquitto.conf" ]; then
-    chmod 644 "${MOSQUITTO_DIR}/config/mosquitto.conf"
+# Ensure mosquitto.conf is readable for Docker/git
+if [ -f "${MOSQUITTO_CONFIG_DIR}/mosquitto.conf" ]; then
+    chmod 644 "${MOSQUITTO_CONFIG_DIR}/mosquitto.conf"
 fi
 
 ################################################################################
-# STEP 6: Directory Permissions
+# STEP 7: Directory permissions
 ################################################################################
-chmod 755 "${CERTS_DIR}" "${NGINX_SSL_DIR}" "${MOSQUITTO_DIR}/config"
-chmod 755 "${MOSQUITTO_DIR}/data" "${MOSQUITTO_DIR}/log"
+chmod 700 "${CERTS_DIR}" "${NGINX_SSL_DIR}" "${MOSQUITTO_CONFIG_DIR}"
+chown -R azureuser:azureuser "${MOSQUITTO_CONFIG_DIR}" 2>/dev/null || true
 
 ################################################################################
 # DONE
@@ -134,9 +129,7 @@ chmod 755 "${MOSQUITTO_DIR}/data" "${MOSQUITTO_DIR}/log"
 echo -e "${GREEN}✅ Initialization Complete!${NC}"
 echo -e "Generated files:"
 echo -e "  • .env (644)"
-echo -e "  • certs/*.key (600), *.crt (644)"
-echo -e "  • nginx/ssl/*.pem (key 600, cert 644)"
+echo -e "  • certs/*.key, *.crt (600)"
+echo -e "  • nginx/ssl/*.pem (600)"
 echo -e "  • mosquitto/config/passwd (600)"
-echo -e "  • mosquitto/config/mosquitto.conf (644)"
-echo -e "  • mosquitto/data, log (755)"
-echo -e "All directories are Git-friendly and Docker-ready."
+echo -e "  • mosquitto/config/.gitkeep (644)"

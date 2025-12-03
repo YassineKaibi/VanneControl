@@ -13,7 +13,7 @@ nginx/ssl/*.key
 nginx/ssl/*.pem
 !certs/.gitkeep
 !nginx/ssl/.gitkeep
-
+mosquitto/config/passwd
 # Logs
 *.log
 mosquitto/log/*
