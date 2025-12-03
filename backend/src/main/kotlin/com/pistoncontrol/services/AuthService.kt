@@ -99,8 +99,8 @@ class AuthService(
             return AuthResult.Failure("Email already registered", statusCode = 409)
         }
 
-        // Generate JWT token
-        val token = generateToken(userId)
+        // Generate JWT token with role
+        val token = generateToken(userId, "user")
         return AuthResult.Success(token, userId.toString())
     }
 
@@ -132,9 +132,10 @@ class AuthService(
             return AuthResult.Failure("Invalid credentials", statusCode = 401)
         }
 
-        // Generate JWT token
+        // Generate JWT token with role
         val userId = user[Users.id]
-        val token = generateToken(userId)
+        val role = user[Users.role]
+        val token = generateToken(userId, role)
         return AuthResult.Success(token, userId.toString())
     }
 
@@ -145,16 +146,19 @@ class AuthService(
      * - Audience: Application identifier
      * - Issuer: Service that created the token
      * - Claim: userId for user identification
+     * - Claim: role for authorization checks
      * - Expiration: 24 hours from creation
      *
      * @param userId User's UUID
+     * @param role User's role (user/admin)
      * @return JWT token string
      */
-    private fun generateToken(userId: UUID): String {
+    private fun generateToken(userId: UUID, role: String): String {
         return JWT.create()
             .withAudience(jwtAudience)
             .withIssuer(jwtIssuer)
             .withClaim("userId", userId.toString())
+            .withClaim("role", role)
             .withExpiresAt(Date(System.currentTimeMillis() + TOKEN_EXPIRY_MS))
             .sign(Algorithm.HMAC256(jwtSecret))
     }

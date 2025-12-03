@@ -106,3 +106,31 @@ data class UpdateScheduleRequest(
     val cronExpression: String? = null,
     val enabled: Boolean? = null
 )
+
+@Serializable
+data class AuditLog(
+    val id: String,
+    val userId: String,
+    val action: String,
+    val targetUserId: String? = null,
+    val targetResourceType: String? = null,
+    val targetResourceId: String? = null,
+    val details: String? = null,
+    val ipAddress: String? = null,
+    val userAgent: String? = null,
+    val createdAt: String
+)
+
+@Serializable
+data class UpdateUserRoleRequest(
+    val role: String
+)
+
+@Serializable
+data class AdminStatsResponse(
+    val totalUsers: Long,
+    val totalAdmins: Long,
+    val totalDevices: Long,
+    val totalSchedules: Long,
+    val recentAuditLogs: List<AuditLog>
+)

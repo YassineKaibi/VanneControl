@@ -55,6 +55,7 @@ fun Application.configureRouting(
         deviceRoutes(mqttManager)
         userRoutes(userService)
         scheduleRoutes(scheduleService, scheduleExecutor)
+        adminRoutes()
         
         authenticate("auth-jwt") {
             get("/devices/{id}/stats") {

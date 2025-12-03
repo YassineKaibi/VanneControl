@@ -83,3 +83,18 @@ object Schedules : Table("schedules") {
 
     override val primaryKey = PrimaryKey(id)
 }
+
+object AuditLogs : Table("audit_logs") {
+    val id = uuid("id").autoGenerate()
+    val userId = uuid("user_id") // Admin who performed the action
+    val action = text("action") // e.g., "UPDATE_USER_ROLE", "DELETE_USER", "VIEW_AUDIT_LOGS"
+    val targetUserId = uuid("target_user_id").nullable() // User affected by the action (if applicable)
+    val targetResourceType = text("target_resource_type").nullable() // e.g., "USER", "DEVICE", "SCHEDULE"
+    val targetResourceId = text("target_resource_id").nullable() // ID of the affected resource
+    val details = jsonb("details").nullable() // Additional context (old values, new values, etc.)
+    val ipAddress = text("ip_address").nullable()
+    val userAgent = text("user_agent").nullable()
+    val createdAt = timestamp("created_at")
+
+    override val primaryKey = PrimaryKey(id)
+}

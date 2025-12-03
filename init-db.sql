@@ -72,6 +72,20 @@ CREATE TABLE IF NOT EXISTS schedules (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Audit logs table (for tracking admin actions)
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    target_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    target_resource_type TEXT,
+    target_resource_id TEXT,
+    details JSONB,
+    ip_address TEXT,
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner_id);
 CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);
@@ -85,6 +99,10 @@ CREATE INDEX IF NOT EXISTS idx_schedules_device ON schedules(device_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_user ON schedules(user_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
 CREATE INDEX IF NOT EXISTS idx_schedules_created ON schedules(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_target_user ON audit_logs(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at DESC);
 
 -- Function to update updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
