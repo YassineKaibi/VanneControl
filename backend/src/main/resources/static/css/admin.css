@@ -41,6 +41,10 @@ body {
    ============================================ */
 .login-page {
     background: var(--honeydew);
+    background-image: url('/admin/static/images/background.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     display: flex;
     align-items: center;
     justify-content: center;
