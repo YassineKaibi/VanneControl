@@ -40,7 +40,7 @@ body {
    Login Page Styles
    ============================================ */
 .login-page {
-    background: var(--bg-color);
+    background: var(--honeydew);
     display: flex;
     align-items: center;
     justify-content: center;
