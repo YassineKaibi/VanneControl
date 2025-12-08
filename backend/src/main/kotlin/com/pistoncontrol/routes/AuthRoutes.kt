@@ -51,7 +51,12 @@ fun Route.authRoutes(jwtSecret: String, jwtIssuer: String, jwtAudience: String) 
                 val request = call.receive<RegisterRequest>()
 
                 // Delegate business logic to service
-                when (val result = authService.register(request.email, request.password)) {
+                when (val result = authService.register(
+                    request.firstName,
+                    request.lastName,
+                    request.email,
+                    request.password
+                )) {
                     is AuthService.AuthResult.Success -> {
                         call.respond(
                             HttpStatusCode.Created,
