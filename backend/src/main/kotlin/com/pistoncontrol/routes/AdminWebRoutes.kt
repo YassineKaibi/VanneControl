@@ -37,9 +37,9 @@ import java.util.UUID
  * - Public routes: /admin/login
  * - Protected routes: Everything else (requires AdminSession)
  */
-fun Route.adminWebRoutes() {
+fun Route.adminWebRoutes(deviceService: com.pistoncontrol.services.DeviceService) {
     val auditLogService = AuditLogService()
-    val adminService = AdminService(auditLogService)
+    val adminService = AdminService(auditLogService, deviceService)
 
     route("/admin") {
         /**
@@ -360,6 +360,88 @@ fun Route.adminWebRoutes() {
                 "totalPages" to totalPages,
                 "totalLogs" to totalLogs
             )))
+        }
+
+        /**
+         * GET /admin/users/{id}/devices
+         *
+         * User devices management page showing:
+         * - All devices owned by the user
+         * - Device status and pistons
+         * - Control buttons for each piston
+         * - Telemetry/history
+         */
+        get("/users/{id}/devices") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@get call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+
+            val user = adminService.getUserById(userId)
+            if (user == null) {
+                call.respond(HttpStatusCode.NotFound, "User not found")
+                return@get
+            }
+
+            val devices = adminService.getUserDevices(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId
+            )
+
+            val telemetry = adminService.getUserTelemetry(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId,
+                limit = 50
+            )
+
+            call.respond(FreeMarkerContent("admin/user-devices.ftl", mapOf(
+                "session" to session,
+                "user" to user,
+                "devices" to devices,
+                "telemetry" to telemetry
+            )))
+        }
+
+        /**
+         * POST /admin/users/{id}/devices/{deviceId}/pistons/{pistonNumber}/control
+         *
+         * Control a piston on a user's device (form submission)
+         *
+         * Form parameters:
+         * - action: "activate" or "deactivate"
+         */
+        post("/users/{id}/devices/{deviceId}/pistons/{pistonNumber}/control") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+            val deviceId = call.parameters["deviceId"]?.let { UUID.fromString(it) }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid device ID")
+            val pistonNumber = call.parameters["pistonNumber"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid piston number")
+
+            val params = call.receiveParameters()
+            val action = params["action"]
+
+            if (action.isNullOrBlank() || action !in listOf("activate", "deactivate")) {
+                call.respondRedirect("/admin/users/$userId/devices?error=invalid_action")
+                return@post
+            }
+
+            val result = adminService.controlUserPiston(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId,
+                deviceId = deviceId,
+                pistonNumber = pistonNumber,
+                action = action
+            )
+
+            when (result) {
+                is AdminService.AdminResult.Success<*> -> {
+                    call.respondRedirect("/admin/users/$userId/devices?success=piston_controlled")
+                }
+                is AdminService.AdminResult.Failure -> {
+                    call.respondRedirect("/admin/users/$userId/devices?error=${result.error}")
+                }
+            }
         }
     }
 }
