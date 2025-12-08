@@ -52,11 +52,15 @@ fun Application.configureRouting(
         }
 
         authRoutes(jwtSecret, jwtIssuer, jwtAudience)
+
+        // Create DeviceService for device and admin routes
+        val deviceService = com.pistoncontrol.services.DeviceService(mqttManager)
+
         deviceRoutes(mqttManager)
         userRoutes(userService)
         scheduleRoutes(scheduleService, scheduleExecutor)
-        adminRoutes()
-        adminWebRoutes()  // Admin web dashboard (HTML pages)
+        adminRoutes(deviceService)
+        adminWebRoutes(deviceService)  // Admin web dashboard (HTML pages)
         
         authenticate("auth-jwt") {
             get("/devices/{id}/stats") {
