@@ -2,6 +2,7 @@ package com.pistoncontrol.services
 
 import com.pistoncontrol.database.DatabaseFactory.dbQuery
 import com.pistoncontrol.database.AuditLogs
+import com.pistoncontrol.database.Users
 import com.pistoncontrol.models.AuditLog
 import org.jetbrains.exposed.sql.*
 import java.time.Instant
@@ -72,7 +73,15 @@ class AuditLogService {
         action: String? = null
     ): List<AuditLog> {
         return dbQuery {
-            val query = AuditLogs.selectAll()
+            // Create aliases for user tables to join both performer and target
+            val performerUser = Users.alias("performer")
+            val targetUser = Users.alias("target")
+
+            // Build query with left joins to get user names
+            val query = AuditLogs
+                .leftJoin(performerUser, { AuditLogs.userId }, { performerUser[Users.id] })
+                .leftJoin(targetUser, { AuditLogs.targetUserId }, { targetUser[Users.id] })
+                .selectAll()
 
             // Apply filters
             userId?.let { query.andWhere { AuditLogs.userId eq it } }
@@ -82,11 +91,23 @@ class AuditLogService {
                 .orderBy(AuditLogs.createdAt to SortOrder.DESC)
                 .limit(limit, offset)
                 .map { row ->
+                    // Build full name for performer
+                    val performerFirstName = row.getOrNull(performerUser[Users.firstName])
+                    val performerLastName = row.getOrNull(performerUser[Users.lastName])
+                    val performerFullName = buildFullName(performerFirstName, performerLastName)
+
+                    // Build full name for target user
+                    val targetFirstName = row.getOrNull(targetUser[Users.firstName])
+                    val targetLastName = row.getOrNull(targetUser[Users.lastName])
+                    val targetFullName = buildFullName(targetFirstName, targetLastName)
+
                     AuditLog(
                         id = row[AuditLogs.id].toString(),
                         userId = row[AuditLogs.userId].toString(),
+                        userFullName = performerFullName,
                         action = row[AuditLogs.action],
                         targetUserId = row[AuditLogs.targetUserId]?.toString(),
+                        targetUserFullName = targetFullName,
                         targetResourceType = row[AuditLogs.targetResourceType],
                         targetResourceId = row[AuditLogs.targetResourceId],
                         details = row[AuditLogs.details],
@@ -95,6 +116,18 @@ class AuditLogService {
                         createdAt = row[AuditLogs.createdAt].toString()
                     )
                 }
+        }
+    }
+
+    /**
+     * Helper function to build full name from first and last names
+     */
+    private fun buildFullName(firstName: String?, lastName: String?): String? {
+        return when {
+            firstName != null && lastName != null -> "$firstName $lastName"
+            firstName != null -> firstName
+            lastName != null -> lastName
+            else -> null
         }
     }
 
