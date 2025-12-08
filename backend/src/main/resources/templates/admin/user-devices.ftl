@@ -19,7 +19,7 @@
                         <div>
                             <h2>${device.name}</h2>
                             <p class="mono text-muted">ID: ${device.id}</p>
-                            <p class="mono text-muted">MQTT Client: ${device.mqttClientId}</p>
+                            <p class="mono text-muted">MQTT Client: ${device.device_id}</p>
                         </div>
                         <div>
                             <span class="badge badge-${device.status}">
