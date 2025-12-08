@@ -4,8 +4,12 @@ import com.pistoncontrol.database.DatabaseFactory.dbQuery
 import com.pistoncontrol.database.Users
 import com.pistoncontrol.database.Devices
 import com.pistoncontrol.database.Schedules
+import com.pistoncontrol.database.Telemetry
 import com.pistoncontrol.models.User
 import com.pistoncontrol.models.AdminStatsResponse
+import com.pistoncontrol.models.TelemetryEvent
+import com.pistoncontrol.routes.DeviceWithPistonsResponse
+import com.pistoncontrol.routes.PistonWithIdResponse
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import java.time.Instant
@@ -18,8 +22,12 @@ import java.util.UUID
  * - User management (listing, updating roles, deleting)
  * - System statistics
  * - Audit log integration
+ * - User device management and control
  */
-class AdminService(private val auditLogService: AuditLogService) {
+class AdminService(
+    private val auditLogService: AuditLogService,
+    private val deviceService: DeviceService
+) {
 
     /**
      * Sealed class for type-safe admin operation results
@@ -235,6 +243,137 @@ class AdminService(private val auditLogService: AuditLogService) {
     suspend fun getUserCount(): Long {
         return dbQuery {
             Users.selectAll().count()
+        }
+    }
+
+    /**
+     * Get all devices owned by a specific user (admin access)
+     *
+     * @param adminUserId ID of the admin performing the action
+     * @param targetUserId ID of the user whose devices to retrieve
+     * @return List of devices with pistons
+     */
+    suspend fun getUserDevices(
+        adminUserId: UUID,
+        targetUserId: UUID
+    ): List<DeviceWithPistonsResponse> {
+        // Log the action
+        auditLogService.logAction(
+            userId = adminUserId,
+            action = "VIEW_USER_DEVICES",
+            targetUserId = targetUserId,
+            targetResourceType = "USER",
+            targetResourceId = targetUserId.toString()
+        )
+
+        // Delegate to DeviceService
+        return when (val result = deviceService.getUserDevices(targetUserId)) {
+            is DeviceService.DeviceResult.DevicesListSuccess -> result.devices
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * Control a user's piston (admin access)
+     *
+     * @param adminUserId ID of the admin performing the action
+     * @param targetUserId ID of the user who owns the device
+     * @param deviceId ID of the device
+     * @param pistonNumber Piston number (1-8)
+     * @param action Action to perform ("activate" or "deactivate")
+     * @return AdminResult with success or failure
+     */
+    suspend fun controlUserPiston(
+        adminUserId: UUID,
+        targetUserId: UUID,
+        deviceId: UUID,
+        pistonNumber: Int,
+        action: String
+    ): AdminResult {
+        // Verify device belongs to target user
+        val deviceOwner = dbQuery {
+            Devices.select { Devices.id eq deviceId }
+                .singleOrNull()
+                ?.get(Devices.ownerId)
+        }
+
+        if (deviceOwner != targetUserId) {
+            return AdminResult.Failure("Device does not belong to specified user", statusCode = 403)
+        }
+
+        // Log the action
+        auditLogService.logAction(
+            userId = adminUserId,
+            action = "CONTROL_USER_PISTON",
+            targetUserId = targetUserId,
+            targetResourceType = "DEVICE",
+            targetResourceId = deviceId.toString(),
+            details = mapOf(
+                "pistonNumber" to pistonNumber.toString(),
+                "action" to action
+            )
+        )
+
+        // Delegate to DeviceService (using targetUserId as the owner)
+        return when (val result = deviceService.controlPiston(targetUserId, deviceId, pistonNumber, action)) {
+            is DeviceService.DeviceResult.PistonSuccess -> {
+                AdminResult.Success(result.piston)
+            }
+            is DeviceService.DeviceResult.Failure -> {
+                AdminResult.Failure(result.error, result.statusCode)
+            }
+            else -> AdminResult.Failure("Unexpected error controlling piston", statusCode = 500)
+        }
+    }
+
+    /**
+     * Get telemetry/history for a specific user's devices (admin access)
+     *
+     * @param adminUserId ID of the admin performing the action
+     * @param targetUserId ID of the user whose telemetry to retrieve
+     * @param limit Maximum number of entries to return
+     * @return List of telemetry events
+     */
+    suspend fun getUserTelemetry(
+        adminUserId: UUID,
+        targetUserId: UUID,
+        limit: Int = 100
+    ): List<TelemetryEvent> {
+        // Log the action
+        auditLogService.logAction(
+            userId = adminUserId,
+            action = "VIEW_USER_TELEMETRY",
+            targetUserId = targetUserId,
+            targetResourceType = "USER",
+            targetResourceId = targetUserId.toString()
+        )
+
+        // Get all device IDs for the user
+        val userDeviceIds = dbQuery {
+            Devices.select { Devices.ownerId eq targetUserId }
+                .map { it[Devices.id] }
+        }
+
+        if (userDeviceIds.isEmpty()) {
+            return emptyList()
+        }
+
+        // Get telemetry for all user devices
+        return dbQuery {
+            Telemetry
+                .select { Telemetry.deviceId inList userDeviceIds }
+                .orderBy(Telemetry.createdAt to SortOrder.DESC)
+                .limit(limit)
+                .map { row ->
+                    TelemetryEvent(
+                        id = row[Telemetry.id],
+                        deviceId = row[Telemetry.deviceId].toString(),
+                        pistonId = row[Telemetry.pistonId]?.toString(),
+                        eventType = row[Telemetry.eventType],
+                        payload = row[Telemetry.payload],
+                        createdAt = row[Telemetry.createdAt].toString()
+                    )
+                }
         }
     }
 }
