@@ -32,19 +32,19 @@
                         <#list device.pistons as piston>
                             <div class="piston-card piston-${piston.state}">
                                 <div class="piston-info">
-                                    <h3>Piston ${piston.pistonNumber}</h3>
+                                    <h3>Piston ${piston.piston_number}</h3>
                                     <span class="piston-status ${piston.state}">
                                         ${piston.state?upper_case}
                                     </span>
-                                    <#if piston.lastTriggered??>
-                                        <p class="text-muted">Last: ${piston.lastTriggered}</p>
+                                    <#if piston.last_triggered??>
+                                        <p class="text-muted">Last: ${piston.last_triggered}</p>
                                     </#if>
                                 </div>
 
                                 <div class="piston-controls">
                                     <form
                                         method="POST"
-                                        action="/admin/users/${user.id}/devices/${device.id}/pistons/${piston.pistonNumber}/control"
+                                        action="/admin/users/${user.id}/devices/${device.id}/pistons/${piston.piston_number}/control"
                                         style="display: inline;"
                                     >
                                         <input type="hidden" name="action" value="activate">
@@ -59,7 +59,7 @@
 
                                     <form
                                         method="POST"
-                                        action="/admin/users/${user.id}/devices/${device.id}/pistons/${piston.pistonNumber}/control"
+                                        action="/admin/users/${user.id}/devices/${device.id}/pistons/${piston.piston_number}/control"
                                         style="display: inline;"
                                     >
                                         <input type="hidden" name="action" value="deactivate">
