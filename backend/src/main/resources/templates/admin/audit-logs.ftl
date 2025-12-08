@@ -28,7 +28,14 @@
                         <#list logs as log>
                             <tr>
                                 <td class="timestamp">${log.createdAt}</td>
-                                <td class="mono">${log.userId}</td>
+                                <td>
+                                    <#if log.userFullName??>
+                                        <strong>${log.userFullName}</strong>
+                                        <br><small class="mono text-muted">${log.userId}</small>
+                                    <#else>
+                                        <span class="mono">${log.userId}</span>
+                                    </#if>
+                                </td>
                                 <td>
                                     <span class="badge">
                                         ${log.action}
@@ -36,7 +43,12 @@
                                 </td>
                                 <td>
                                     <#if log.targetUserId??>
-                                        User: ${log.targetUserId}
+                                        <#if log.targetUserFullName??>
+                                            <strong>${log.targetUserFullName}</strong>
+                                            <br><small class="mono text-muted">User: ${log.targetUserId}</small>
+                                        <#else>
+                                            User: ${log.targetUserId}
+                                        </#if>
                                     <#elseif log.targetResourceType??>
                                         ${log.targetResourceType}: ${log.targetResourceId}
                                     <#else>
