@@ -55,11 +55,13 @@ class AuthService(
      * 5. Insert user into database
      * 6. Generate JWT token
      *
+     * @param firstName User's first name
+     * @param lastName User's last name
      * @param email User's email address
      * @param password User's plaintext password (will be hashed)
      * @return AuthResult.Success with token, or AuthResult.Failure with error
      */
-    suspend fun register(email: String, password: String): AuthResult {
+    suspend fun register(firstName: String, lastName: String, email: String, password: String): AuthResult {
         // Validate email format
         if (!isValidEmail(email)) {
             return AuthResult.Failure("Invalid email format")
@@ -89,6 +91,8 @@ class AuthService(
                 it[Users.email] = email
                 it[Users.passwordHash] = hashedPassword
                 it[Users.role] = "user"
+                it[Users.firstName] = firstName
+                it[Users.lastName] = lastName
                 it[Users.createdAt] = Instant.now()
                 it[Users.updatedAt] = Instant.now()
             } get Users.id
