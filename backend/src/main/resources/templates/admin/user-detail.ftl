@@ -4,7 +4,12 @@
     <div class="user-detail-container">
         <div class="page-header">
             <h1>User Details</h1>
-            <a href="/admin/users" class="btn btn-secondary">← Back to Users</a>
+            <div class="header-actions">
+                <a href="/admin/users/${user.id}/devices" class="btn btn-primary">
+                    View Devices & Control
+                </a>
+                <a href="/admin/users" class="btn btn-secondary">← Back to Users</a>
+            </div>
         </div>
 
         <div class="user-detail-grid">
@@ -83,4 +88,11 @@
             </div>
         </div>
     </div>
+
+    <style>
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+    </style>
 </@layout.layout>
