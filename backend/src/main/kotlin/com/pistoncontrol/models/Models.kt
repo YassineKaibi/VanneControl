@@ -111,8 +111,10 @@ data class UpdateScheduleRequest(
 data class AuditLog(
     val id: String,
     val userId: String,
+    val userFullName: String? = null,  // First + Last name of admin who performed action
     val action: String,
     val targetUserId: String? = null,
+    val targetUserFullName: String? = null,  // First + Last name of target user
     val targetResourceType: String? = null,
     val targetResourceId: String? = null,
     val details: String? = null,
