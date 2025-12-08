@@ -22,9 +22,9 @@ import java.util.UUID
  *
  * All routes require admin authentication via "admin-jwt"
  */
-fun Route.adminRoutes() {
+fun Route.adminRoutes(deviceService: com.pistoncontrol.services.DeviceService) {
     val auditLogService = AuditLogService()
-    val adminService = AdminService(auditLogService)
+    val adminService = AdminService(auditLogService, deviceService)
 
     // All admin routes require admin authentication
     authenticate("admin-jwt") {
@@ -309,6 +309,104 @@ fun Route.adminRoutes() {
                     call.respond(
                         HttpStatusCode.InternalServerError,
                         ErrorResponse("Failed to retrieve audit logs: ${e.message}")
+                    )
+                }
+            }
+
+            /**
+             * GET /admin/users/{userId}/devices
+             * Get all devices owned by a specific user
+             *
+             * Admin can view any user's devices for support/monitoring purposes
+             */
+            get("/users/{userId}/devices") {
+                try {
+                    val principal = call.principal<JWTPrincipal>()!!
+                    val adminUserId = UUID.fromString(principal.payload.getClaim("userId").asString())
+                    val targetUserId = call.parameters["userId"]?.let { UUID.fromString(it) }
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid user ID"))
+
+                    val devices = adminService.getUserDevices(adminUserId, targetUserId)
+
+                    call.respond(HttpStatusCode.OK, mapOf("devices" to devices))
+                } catch (e: Exception) {
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        ErrorResponse("Failed to retrieve user devices: ${e.message}")
+                    )
+                }
+            }
+
+            /**
+             * POST /admin/users/{userId}/devices/{deviceId}/pistons/{pistonNumber}
+             * Control a specific piston on a user's device
+             *
+             * Request body: { "action": "activate" | "deactivate" }
+             */
+            post("/users/{userId}/devices/{deviceId}/pistons/{pistonNumber}") {
+                try {
+                    val principal = call.principal<JWTPrincipal>()!!
+                    val adminUserId = UUID.fromString(principal.payload.getClaim("userId").asString())
+                    val targetUserId = call.parameters["userId"]?.let { UUID.fromString(it) }
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid user ID"))
+                    val deviceId = call.parameters["deviceId"]?.let { UUID.fromString(it) }
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid device ID"))
+                    val pistonNumber = call.parameters["pistonNumber"]?.toIntOrNull()
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid piston number"))
+
+                    val request = call.receive<PistonCommand>()
+
+                    when (val result = adminService.controlUserPiston(
+                        adminUserId = adminUserId,
+                        targetUserId = targetUserId,
+                        deviceId = deviceId,
+                        pistonNumber = pistonNumber,
+                        action = request.action
+                    )) {
+                        is AdminService.AdminResult.Success<*> -> {
+                            call.respond(HttpStatusCode.OK, mapOf(
+                                "message" to "Piston ${request.action}d successfully",
+                                "piston" to result.data
+                            ))
+                        }
+                        is AdminService.AdminResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        ErrorResponse("Failed to control piston: ${e.message}")
+                    )
+                }
+            }
+
+            /**
+             * GET /admin/users/{userId}/telemetry
+             * Get telemetry/history for all of a user's devices
+             *
+             * Query parameters:
+             * - limit: Number of entries to return (default: 100)
+             */
+            get("/users/{userId}/telemetry") {
+                try {
+                    val principal = call.principal<JWTPrincipal>()!!
+                    val adminUserId = UUID.fromString(principal.payload.getClaim("userId").asString())
+                    val targetUserId = call.parameters["userId"]?.let { UUID.fromString(it) }
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid user ID"))
+
+                    val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
+
+                    val telemetry = adminService.getUserTelemetry(adminUserId, targetUserId, limit)
+
+                    call.respond(HttpStatusCode.OK, mapOf("telemetry" to telemetry))
+                } catch (e: Exception) {
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        ErrorResponse("Failed to retrieve telemetry: ${e.message}")
                     )
                 }
             }
