@@ -91,7 +91,7 @@ class WebSocketManager(private val mqttManager: MqttManager) : CoroutineScope {
                             put("device_id", message.deviceId)
                             put("piston_number", payload.pistonNumber)
                             put("state", if (payload.isActive) "active" else "inactive")
-                            put("timestamp", payload.timestamp.toString())
+                            put("timestamp", payload.timestamp)
                         }.toString()
                     }
                     is MessagePayload.Status -> {
@@ -100,7 +100,7 @@ class WebSocketManager(private val mqttManager: MqttManager) : CoroutineScope {
                             put("type", "device_status")  // Matches mobile expectations
                             put("device_id", message.deviceId)
                             put("status", payload.status)
-                            put("timestamp", System.currentTimeMillis().toString())
+                            put("timestamp", System.currentTimeMillis())
                         }.toString()
                     }
                     else -> {

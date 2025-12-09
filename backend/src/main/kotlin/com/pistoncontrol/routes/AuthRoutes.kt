@@ -55,6 +55,7 @@ fun Route.authRoutes(jwtSecret: String, jwtIssuer: String, jwtAudience: String) 
                     request.firstName,
                     request.lastName,
                     request.email,
+                    request.phoneNumber,
                     request.password
                 )) {
                     is AuthService.AuthResult.Success -> {

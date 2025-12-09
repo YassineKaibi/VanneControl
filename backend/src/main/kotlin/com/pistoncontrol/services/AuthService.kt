@@ -58,10 +58,11 @@ class AuthService(
      * @param firstName User's first name
      * @param lastName User's last name
      * @param email User's email address
+     * @param phoneNumber User's phone number
      * @param password User's plaintext password (will be hashed)
      * @return AuthResult.Success with token, or AuthResult.Failure with error
      */
-    suspend fun register(firstName: String, lastName: String, email: String, password: String): AuthResult {
+    suspend fun register(firstName: String, lastName: String, email: String, phoneNumber: String, password: String): AuthResult {
         // Validate email format
         if (!isValidEmail(email)) {
             return AuthResult.Failure("Invalid email format")
@@ -93,6 +94,7 @@ class AuthService(
                 it[Users.role] = "user"
                 it[Users.firstName] = firstName
                 it[Users.lastName] = lastName
+                it[Users.phoneNumber] = phoneNumber
                 it[Users.createdAt] = Instant.now()
                 it[Users.updatedAt] = Instant.now()
             } get Users.id
