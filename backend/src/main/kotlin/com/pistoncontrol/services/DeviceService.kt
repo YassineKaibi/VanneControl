@@ -3,11 +3,14 @@ package com.pistoncontrol.services
 import com.pistoncontrol.database.DatabaseFactory.dbQuery
 import com.pistoncontrol.database.Devices
 import com.pistoncontrol.database.Pistons
+import com.pistoncontrol.database.Telemetry
 import com.pistoncontrol.mqtt.MqttManager
 import com.pistoncontrol.routes.*
 import org.jetbrains.exposed.sql.*
 import java.time.Instant
 import java.util.UUID
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * DeviceService - Centralized Device and Piston Management Business Logic
@@ -254,6 +257,7 @@ class DeviceService(private val mqttManager: MqttManager) {
      *
      * If piston record exists: updates state and last_triggered timestamp
      * If piston record doesn't exist: creates new record
+     * Also records telemetry event for tracking valve history
      *
      * @param deviceId Device UUID
      * @param pistonNumber Piston number (1-8)
@@ -273,37 +277,47 @@ class DeviceService(private val mqttManager: MqttManager) {
                 (Pistons.deviceId eq deviceId) and (Pistons.pistonNumber eq pistonNumber)
             }.singleOrNull()
 
+            val pistonId: UUID
+
             if (existing != null) {
                 // Update existing piston
+                pistonId = existing[Pistons.id]
                 Pistons.update({
                     (Pistons.deviceId eq deviceId) and (Pistons.pistonNumber eq pistonNumber)
                 }) {
                     it[Pistons.state] = state
                     it[lastTriggered] = now
                 }
-
-                PistonWithIdResponse(
-                    id = existing[Pistons.id].toString(),
-                    piston_number = pistonNumber,
-                    state = state,
-                    last_triggered = now.toString()
-                )
             } else {
                 // Create new piston record
-                val pistonId = Pistons.insert {
+                pistonId = Pistons.insert {
                     it[Pistons.deviceId] = deviceId
                     it[Pistons.pistonNumber] = pistonNumber
                     it[Pistons.state] = state
                     it[lastTriggered] = now
                 } get Pistons.id
-
-                PistonWithIdResponse(
-                    id = pistonId.toString(),
-                    piston_number = pistonNumber,
-                    state = state,
-                    last_triggered = now.toString()
-                )
             }
+
+            // Record telemetry event for valve history tracking
+            val jsonPayload = buildJsonObject {
+                put("piston_number", pistonNumber)
+                put("timestamp", now.toEpochMilli())
+            }.toString()
+
+            Telemetry.insert {
+                it[Telemetry.deviceId] = deviceId
+                it[Telemetry.pistonId] = pistonId
+                it[eventType] = if (state == "active") "activated" else "deactivated"
+                it[payload] = jsonPayload
+                it[createdAt] = now
+            }
+
+            PistonWithIdResponse(
+                id = pistonId.toString(),
+                piston_number = pistonNumber,
+                state = state,
+                last_triggered = now.toString()
+            )
         }
     }
 
