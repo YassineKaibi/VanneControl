@@ -443,5 +443,62 @@ fun Route.adminWebRoutes(deviceService: com.pistoncontrol.services.DeviceService
                 }
             }
         }
+
+        /**
+         * GET /admin/users/{id}/history
+         *
+         * Valve activation/deactivation history page showing:
+         * - Full history of all valve activations and deactivations
+         * - Filtering by piston number, action type, date range
+         * - Pagination support
+         *
+         * Query parameters:
+         * - pistonNumber: Filter by piston number (1-8)
+         * - action: Filter by action type ("activated" or "deactivated")
+         * - startDate: Filter by start date (ISO format)
+         * - endDate: Filter by end date (ISO format)
+         * - limit: Maximum results (default: 1000)
+         */
+        get("/users/{id}/history") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@get call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+
+            val user = adminService.getUserById(userId)
+            if (user == null) {
+                call.respond(HttpStatusCode.NotFound, "User not found")
+                return@get
+            }
+
+            // Get filter parameters
+            val pistonNumber = call.request.queryParameters["pistonNumber"]?.toIntOrNull()
+            val action = call.request.queryParameters["action"]
+            val startDate = call.request.queryParameters["startDate"]
+            val endDate = call.request.queryParameters["endDate"]
+            val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 1000
+
+            // Get filtered history
+            val history = adminService.getUserValveHistory(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId,
+                pistonNumber = pistonNumber,
+                action = action,
+                startDate = startDate,
+                endDate = endDate,
+                limit = limit
+            )
+
+            call.respond(FreeMarkerContent("admin/user-history.ftl", mapOf(
+                "session" to session,
+                "user" to user,
+                "history" to history,
+                "filters" to mapOf(
+                    "pistonNumber" to pistonNumber,
+                    "action" to action,
+                    "startDate" to startDate,
+                    "endDate" to endDate
+                )
+            )))
+        }
     }
 }

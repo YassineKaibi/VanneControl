@@ -376,4 +376,108 @@ class AdminService(
                 }
         }
     }
+
+    /**
+     * Get valve activation/deactivation history with filtering (admin access)
+     *
+     * @param adminUserId ID of the admin performing the action
+     * @param targetUserId ID of the user whose history to retrieve
+     * @param pistonNumber Filter by piston number (optional)
+     * @param action Filter by action type: "activated" or "deactivated" (optional)
+     * @param startDate Filter by start date (ISO format, optional)
+     * @param endDate Filter by end date (ISO format, optional)
+     * @param limit Maximum number of entries to return
+     * @return List of filtered telemetry events
+     */
+    suspend fun getUserValveHistory(
+        adminUserId: UUID,
+        targetUserId: UUID,
+        pistonNumber: Int? = null,
+        action: String? = null,
+        startDate: String? = null,
+        endDate: String? = null,
+        limit: Int = 1000
+    ): List<TelemetryEvent> {
+        // Log the action
+        auditLogService.logAction(
+            userId = adminUserId,
+            action = "VIEW_USER_VALVE_HISTORY",
+            targetUserId = targetUserId,
+            targetResourceType = "USER",
+            targetResourceId = targetUserId.toString(),
+            details = mapOf(
+                "pistonNumber" to (pistonNumber?.toString() ?: "all"),
+                "action" to (action ?: "all"),
+                "startDate" to (startDate ?: "none"),
+                "endDate" to (endDate ?: "none")
+            )
+        )
+
+        // Get all device IDs and piston IDs for the user
+        val userDeviceIds = dbQuery {
+            Devices.select { Devices.ownerId eq targetUserId }
+                .map { it[Devices.id] }
+        }
+
+        if (userDeviceIds.isEmpty()) {
+            return emptyList()
+        }
+
+        // Get telemetry with filters
+        return dbQuery {
+            var query = Telemetry
+                .select {
+                    (Telemetry.deviceId inList userDeviceIds) and
+                    (Telemetry.eventType inList listOf("activated", "deactivated"))
+                }
+
+            // Filter by action type (activated/deactivated)
+            if (action != null && action in listOf("activated", "deactivated")) {
+                query = query.andWhere { Telemetry.eventType eq action }
+            }
+
+            // Filter by date range
+            if (startDate != null) {
+                try {
+                    val start = Instant.parse(startDate)
+                    query = query.andWhere { Telemetry.createdAt greaterEq start }
+                } catch (e: Exception) {
+                    // Invalid date format, skip filter
+                }
+            }
+
+            if (endDate != null) {
+                try {
+                    val end = Instant.parse(endDate)
+                    query = query.andWhere { Telemetry.createdAt lessEq end }
+                } catch (e: Exception) {
+                    // Invalid date format, skip filter
+                }
+            }
+
+            val results = query
+                .orderBy(Telemetry.createdAt to SortOrder.DESC)
+                .limit(limit)
+                .map { row ->
+                    TelemetryEvent(
+                        id = row[Telemetry.id],
+                        deviceId = row[Telemetry.deviceId].toString(),
+                        pistonId = row[Telemetry.pistonId]?.toString(),
+                        eventType = row[Telemetry.eventType],
+                        payload = row[Telemetry.payload],
+                        createdAt = row[Telemetry.createdAt].toString()
+                    )
+                }
+
+            // Filter by piston number (if specified) by checking payload
+            if (pistonNumber != null) {
+                results.filter { event ->
+                    event.payload?.contains("\"pistonNumber\":$pistonNumber") == true ||
+                    event.payload?.contains("\"piston_number\":$pistonNumber") == true
+                }
+            } else {
+                results
+            }
+        }
+    }
 }

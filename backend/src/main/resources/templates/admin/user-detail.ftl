@@ -5,6 +5,9 @@
         <div class="page-header">
             <h1>User Details</h1>
             <div class="header-actions">
+                <a href="/admin/users/${user.id}/history" class="btn btn-primary">
+                    View Valve History
+                </a>
                 <a href="/admin/users/${user.id}/devices" class="btn btn-primary">
                     View Devices & Control
                 </a>

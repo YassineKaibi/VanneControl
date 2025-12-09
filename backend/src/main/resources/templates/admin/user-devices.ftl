@@ -8,6 +8,7 @@
                 <p class="text-muted">${user.email}</p>
             </div>
             <div class="header-actions">
+                <a href="/admin/users/${user.id}/history" class="btn btn-primary">View Valve History</a>
                 <a href="/admin/users/${user.id}" class="btn btn-secondary">← Back to User</a>
             </div>
         </div>
