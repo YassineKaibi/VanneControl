@@ -46,6 +46,8 @@ class DeviceService(private val mqttManager: MqttManager) {
         data class DevicesListSuccess(val devices: List<DeviceWithPistonsResponse>) : DeviceResult()
         data class PistonSuccess(val piston: PistonWithIdResponse, val message: String) : DeviceResult()
         data class PistonsListSuccess(val pistons: List<PistonResponse>) : DeviceResult()
+        data class DeviceStatsSuccess(val stats: DeviceStatsResponse) : DeviceResult()
+        data class TelemetryListSuccess(val telemetry: List<TelemetryEventResponse>) : DeviceResult()
         data class Failure(val error: String, val statusCode: Int = 400) : DeviceResult()
     }
 
@@ -335,6 +337,151 @@ class DeviceService(private val mqttManager: MqttManager) {
                 state = it[Pistons.state],
                 last_triggered = it[Pistons.lastTriggered]?.toString()
             )
+        }
+    }
+
+    /**
+     * Get statistics for a specific device
+     *
+     * @param userId Owner's UUID for authorization
+     * @param deviceId Device UUID
+     * @return DeviceResult with device statistics
+     */
+    suspend fun getDeviceStats(userId: UUID, deviceId: UUID): DeviceResult {
+        return dbQuery {
+            // Verify ownership
+            val device = Devices.select {
+                (Devices.id eq deviceId) and (Devices.ownerId eq userId)
+            }.singleOrNull()
+
+            if (device == null) {
+                return@dbQuery DeviceResult.Failure("Device not found", 404)
+            }
+
+            // Get piston statistics
+            val pistons = Pistons.select { Pistons.deviceId eq deviceId }.toList()
+            val activePistons = pistons.count { it[Pistons.state] == "active" }
+            val totalPistons = pistons.size
+
+            // Get telemetry count
+            val totalEvents = Telemetry.select { Telemetry.deviceId eq deviceId }.count()
+
+            // Get last activity timestamp
+            val lastActivity = Telemetry
+                .select { Telemetry.deviceId eq deviceId }
+                .orderBy(Telemetry.createdAt to SortOrder.DESC)
+                .limit(1)
+                .map { it[Telemetry.createdAt] }
+                .firstOrNull()
+
+            DeviceResult.DeviceStatsSuccess(
+                DeviceStatsResponse(
+                    deviceId = deviceId.toString(),
+                    deviceName = device[Devices.name],
+                    status = device[Devices.status],
+                    activePistons = activePistons,
+                    totalPistons = totalPistons,
+                    totalEvents = totalEvents,
+                    lastActivity = lastActivity?.toString()
+                )
+            )
+        }
+    }
+
+    /**
+     * Get telemetry/history for user's devices with optional filtering
+     *
+     * @param userId User's UUID for authorization
+     * @param deviceId Optional device filter
+     * @param pistonNumber Optional piston number filter (1-8)
+     * @param action Optional action filter ("activated" or "deactivated")
+     * @param startDate Optional start date (ISO format)
+     * @param endDate Optional end date (ISO format)
+     * @param limit Maximum number of results
+     * @return DeviceResult with telemetry events
+     */
+    suspend fun getUserTelemetry(
+        userId: UUID,
+        deviceId: UUID? = null,
+        pistonNumber: Int? = null,
+        action: String? = null,
+        startDate: String? = null,
+        endDate: String? = null,
+        limit: Int = 100
+    ): DeviceResult {
+        return dbQuery {
+            // Get all device IDs for the user (or just the specified device)
+            val userDeviceIds = if (deviceId != null) {
+                // Verify ownership of specified device
+                val device = Devices.select {
+                    (Devices.id eq deviceId) and (Devices.ownerId eq userId)
+                }.singleOrNull()
+
+                if (device == null) {
+                    return@dbQuery DeviceResult.Failure("Device not found", 404)
+                }
+                listOf(deviceId)
+            } else {
+                Devices.select { Devices.ownerId eq userId }.map { it[Devices.id] }
+            }
+
+            if (userDeviceIds.isEmpty()) {
+                return@dbQuery DeviceResult.TelemetryListSuccess(emptyList())
+            }
+
+            // Build query with filters
+            var query = Telemetry.select {
+                (Telemetry.deviceId inList userDeviceIds) and
+                (Telemetry.eventType inList listOf("activated", "deactivated"))
+            }
+
+            // Filter by action type (activated/deactivated)
+            if (action != null && action in listOf("activated", "deactivated")) {
+                query = query.andWhere { Telemetry.eventType eq action }
+            }
+
+            // Filter by date range
+            if (startDate != null) {
+                try {
+                    val start = Instant.parse(startDate)
+                    query = query.andWhere { Telemetry.createdAt greaterEq start }
+                } catch (e: Exception) {
+                    // Invalid date format, skip filter
+                }
+            }
+
+            if (endDate != null) {
+                try {
+                    val end = Instant.parse(endDate)
+                    query = query.andWhere { Telemetry.createdAt lessEq end }
+                } catch (e: Exception) {
+                    // Invalid date format, skip filter
+                }
+            }
+
+            var results = query
+                .orderBy(Telemetry.createdAt to SortOrder.DESC)
+                .limit(limit)
+                .map { row ->
+                    TelemetryEventResponse(
+                        id = row[Telemetry.id],
+                        deviceId = row[Telemetry.deviceId].toString(),
+                        pistonId = row[Telemetry.pistonId]?.toString(),
+                        eventType = row[Telemetry.eventType],
+                        payload = row[Telemetry.payload],
+                        createdAt = row[Telemetry.createdAt].toString()
+                    )
+                }
+
+            // Filter by piston number (if specified) by checking payload
+            if (pistonNumber != null) {
+                results = results.filter { event ->
+                    event.payload?.contains("\"piston_number\":$pistonNumber") == true ||
+                    event.payload?.contains("\"pistonNumber\":$pistonNumber") == true
+                }
+            }
+
+            DeviceResult.TelemetryListSuccess(results)
         }
     }
 }

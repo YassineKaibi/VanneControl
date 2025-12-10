@@ -94,3 +94,29 @@ data class PistonWithIdResponse(
     val state: String,
     val last_triggered: String?
 )
+
+@Serializable
+data class DeviceStatsResponse(
+    val deviceId: String,
+    val deviceName: String,
+    val status: String,
+    val activePistons: Int,
+    val totalPistons: Int,
+    val totalEvents: Long,
+    val lastActivity: String?
+)
+
+@Serializable
+data class TelemetryEventResponse(
+    val id: Long,
+    val deviceId: String,
+    val pistonId: String?,
+    val eventType: String,
+    val payload: String?,
+    val createdAt: String
+)
+
+@Serializable
+data class TelemetryListResponse(
+    val telemetry: List<TelemetryEventResponse>
+)
