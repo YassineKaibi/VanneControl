@@ -260,8 +260,8 @@ fun Route.scheduleRoutes(
             }
 
             /**
-             * PUT /schedules/{id}
-             * Update a schedule
+             * PATCH /schedules/{id}
+             * Update a schedule (partial update)
              *
              * Request Body:
              * {
@@ -278,11 +278,11 @@ fun Route.scheduleRoutes(
              *   ...
              * }
              */
-            put("/{id}") {
+            patch("/{id}") {
                 try {
                     val principal = call.principal<JWTPrincipal>()!!
                     val userId = principal.payload.getClaim("userId").asString()
-                    val scheduleId = call.parameters["id"] ?: return@put call.respond(
+                    val scheduleId = call.parameters["id"] ?: return@patch call.respond(
                         HttpStatusCode.BadRequest,
                         ErrorResponse("Missing schedule ID")
                     )

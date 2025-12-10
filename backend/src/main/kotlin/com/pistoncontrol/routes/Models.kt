@@ -25,8 +25,11 @@ data class LoginResponse(
 
 @Serializable
 data class ErrorResponse(
-    val error: String
-)
+    val error: String? = null,
+    val message: String? = null
+) {
+    constructor(errorMessage: String) : this(error = errorMessage, message = errorMessage)
+}
 
 @Serializable
 data class PistonCommand(
