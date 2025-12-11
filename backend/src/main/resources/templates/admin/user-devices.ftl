@@ -61,16 +61,14 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="mqttClientId">MQTT Client ID *</label>
+                        <label for="mqttClientId">MQTT Client ID</label>
                         <input
                             type="text"
                             id="mqttClientId"
                             name="mqttClientId"
-                            placeholder="e.g., device-12345"
-                            required
-                            class="form-control"
+                            readonly
+                            class="form-control form-control-readonly"
                         />
-                        <small class="form-hint">Must be globally unique across all devices</small>
                     </div>
 
                     <div class="form-actions">
@@ -384,5 +382,26 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        /* Readonly form control styling */
+        .form-control-readonly {
+            background-color: #f3f4f6;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
     </style>
+
+    <script>
+        // Auto-generate unique MQTT Client ID when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const mqttClientIdInput = document.getElementById('mqttClientId');
+            if (mqttClientIdInput) {
+                // Generate unique ID using timestamp and random string
+                const timestamp = Date.now().toString(36);
+                const randomStr = Math.random().toString(36).substring(2, 10);
+                const uniqueId = 'device-' + timestamp + '-' + randomStr;
+                mqttClientIdInput.value = uniqueId;
+            }
+        });
+    </script>
 </@layout.layout>
