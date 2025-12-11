@@ -179,16 +179,8 @@ class AdminService(
 
         val userEmail = user[Users.email]
 
-        // Delete user
-        val deleted = dbQuery {
-            Users.deleteWhere { Users.id eq targetUserId }
-        }
-
-        if (deleted == 0) {
-            return AdminResult.Failure("Failed to delete user", statusCode = 500)
-        }
-
-        // Log the action
+        // Log the action BEFORE deleting the user
+        // This is critical because audit_logs.target_user_id has a foreign key constraint
         auditLogService.logAction(
             userId = adminUserId,
             action = "DELETE_USER",
@@ -199,6 +191,15 @@ class AdminService(
                 "email" to userEmail
             )
         )
+
+        // Delete user
+        val deleted = dbQuery {
+            Users.deleteWhere { Users.id eq targetUserId }
+        }
+
+        if (deleted == 0) {
+            return AdminResult.Failure("Failed to delete user", statusCode = 500)
+        }
 
         return AdminResult.Success(true)
     }
