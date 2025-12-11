@@ -23,24 +23,24 @@ object Users : Table("users") {
 }
 
 object Devices : Table("devices") {
-    val id = uuid("id")
+    val id = uuid("id").autoGenerate()
     val name = text("name")
     val ownerId = uuid("owner_id")
     val mqttClientId = text("mqtt_client_id")
     val status = text("status")
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
-    
+
     override val primaryKey = PrimaryKey(id)
 }
 
 object Pistons : Table("pistons") {
-    val id = uuid("id")
+    val id = uuid("id").autoGenerate()
     val deviceId = uuid("device_id")
     val pistonNumber = integer("piston_number")
     val state = text("state")
     val lastTriggered = timestamp("last_triggered").nullable()
-    
+
     override val primaryKey = PrimaryKey(id)
 }
 
