@@ -5,6 +5,7 @@ import com.pistoncontrol.database.Users
 import com.pistoncontrol.database.Devices
 import com.pistoncontrol.database.Schedules
 import com.pistoncontrol.database.Telemetry
+import com.pistoncontrol.database.Pistons
 import com.pistoncontrol.models.User
 import com.pistoncontrol.models.AdminStatsResponse
 import com.pistoncontrol.models.TelemetryEvent
