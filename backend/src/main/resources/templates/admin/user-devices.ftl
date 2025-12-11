@@ -9,9 +9,6 @@
             </div>
             <div class="header-actions">
                 <a href="/admin/users/${user.id}/history" class="btn btn-primary">View Valve History</a>
-                <form method="POST" action="/admin/users/${user.id}/clear-history" style="display: inline;" onsubmit="return confirm('Are you sure you want to clear all history and statistics for this user? This will delete all telemetry data for their devices. This action cannot be undone.');">
-                    <button type="submit" class="btn btn-warning">Clear History</button>
-                </form>
                 <a href="/admin/users/${user.id}" class="btn btn-secondary">← Back to User</a>
             </div>
         </div>
