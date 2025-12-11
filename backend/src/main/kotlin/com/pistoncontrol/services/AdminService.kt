@@ -12,6 +12,7 @@ import com.pistoncontrol.routes.DeviceWithPistonsResponse
 import com.pistoncontrol.routes.PistonWithIdResponse
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
 import java.time.Instant
 import java.util.UUID
 
@@ -580,7 +581,7 @@ class AdminService(
         // Delete all telemetry data for user's devices
         val deletedCount = if (userDeviceIds.isNotEmpty()) {
             dbQuery {
-                Telemetry.deleteWhere { Telemetry.deviceId inList userDeviceIds }
+                Telemetry.deleteWhere { deviceId inList userDeviceIds }
             }
         } else {
             0
