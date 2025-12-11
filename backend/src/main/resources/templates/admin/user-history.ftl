@@ -135,8 +135,8 @@
                                 <td class="timestamp">${event.createdAt}</td>
                                 <td class="mono">${event.deviceId}</td>
                                 <td>
-                                    <#if event.pistonId??>
-                                        ${event.pistonId}
+                                    <#if event.pistonNumber??>
+                                        ${event.pistonNumber}
                                     <#else>
                                         -
                                     </#if>

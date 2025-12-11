@@ -92,7 +92,7 @@
                 <form
                     method="POST"
                     action="/admin/users/${user.id}/clear-history"
-                    class="clear-history-form"
+                    class="danger-zone-form"
                     onsubmit="return confirm('Are you sure you want to clear all history and statistics for this user? This will delete all telemetry data for their devices. This action cannot be undone.');"
                 >
                     <button type="submit" class="btn btn-warning">
@@ -103,7 +103,7 @@
                 <form
                     method="POST"
                     action="/admin/users/${user.id}/delete"
-                    class="delete-form"
+                    class="danger-zone-form"
                     onsubmit="return confirm('Are you sure you want to delete this user? This action cannot be undone.');"
                 >
                     <button type="submit" class="btn btn-danger">
@@ -120,22 +120,12 @@
             gap: 10px;
         }
 
-        .clear-history-form {
+        .danger-zone-form {
             margin-bottom: 15px;
         }
 
-        .btn-warning {
-            background-color: #f0ad4e;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            cursor: pointer;
-            border-radius: 4px;
+        .danger-zone-form .btn {
             width: 100%;
-        }
-
-        .btn-warning:hover {
-            background-color: #ec971f;
         }
     </style>
 </@layout.layout>

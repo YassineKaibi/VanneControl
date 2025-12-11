@@ -70,6 +70,7 @@ data class TelemetryEvent(
     val id: Long,
     val deviceId: String,
     val pistonId: String?,
+    val pistonNumber: Int?,
     val eventType: String,
     val payload: String?,
     val createdAt: String

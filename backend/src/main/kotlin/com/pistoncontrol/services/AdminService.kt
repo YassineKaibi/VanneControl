@@ -360,9 +360,10 @@ class AdminService(
             return emptyList()
         }
 
-        // Get telemetry for all user devices
+        // Get telemetry for all user devices - join with Pistons to get piston number
         return dbQuery {
             Telemetry
+                .leftJoin(Pistons, { Telemetry.pistonId }, { Pistons.id })
                 .select { Telemetry.deviceId inList userDeviceIds }
                 .orderBy(Telemetry.createdAt to SortOrder.DESC)
                 .limit(limit)
@@ -371,6 +372,7 @@ class AdminService(
                         id = row[Telemetry.id],
                         deviceId = row[Telemetry.deviceId].toString(),
                         pistonId = row[Telemetry.pistonId]?.toString(),
+                        pistonNumber = row.getOrNull(Pistons.pistonNumber),
                         eventType = row[Telemetry.eventType],
                         payload = row[Telemetry.payload],
                         createdAt = row[Telemetry.createdAt].toString()
@@ -425,13 +427,19 @@ class AdminService(
             return emptyList()
         }
 
-        // Get telemetry with filters
+        // Get telemetry with filters - always join with Pistons to get piston number
         return dbQuery {
             var query = Telemetry
+                .leftJoin(Pistons, { Telemetry.pistonId }, { Pistons.id })
                 .select {
                     (Telemetry.deviceId inList userDeviceIds) and
                     (Telemetry.eventType inList listOf("activated", "deactivated"))
                 }
+
+            // Filter by piston number
+            if (pistonNumber != null) {
+                query = query.andWhere { Pistons.pistonNumber eq pistonNumber }
+            }
 
             // Filter by action type (activated/deactivated)
             if (action != null && action in listOf("activated", "deactivated")) {
@@ -457,7 +465,7 @@ class AdminService(
                 }
             }
 
-            val results = query
+            query
                 .orderBy(Telemetry.createdAt to SortOrder.DESC)
                 .limit(limit)
                 .map { row ->
@@ -465,21 +473,12 @@ class AdminService(
                         id = row[Telemetry.id],
                         deviceId = row[Telemetry.deviceId].toString(),
                         pistonId = row[Telemetry.pistonId]?.toString(),
+                        pistonNumber = row.getOrNull(Pistons.pistonNumber),
                         eventType = row[Telemetry.eventType],
                         payload = row[Telemetry.payload],
                         createdAt = row[Telemetry.createdAt].toString()
                     )
                 }
-
-            // Filter by piston number (if specified) by checking payload
-            if (pistonNumber != null) {
-                results.filter { event ->
-                    event.payload?.contains("\"pistonNumber\":$pistonNumber") == true ||
-                    event.payload?.contains("\"piston_number\":$pistonNumber") == true
-                }
-            } else {
-                results
-            }
         }
     }
 

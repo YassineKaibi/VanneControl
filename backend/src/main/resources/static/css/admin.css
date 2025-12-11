@@ -417,6 +417,17 @@ body {
     color: white;
 }
 
+.btn-warning {
+    background-color: transparent;
+    color: var(--warning-color);
+    border-color: var(--warning-color);
+}
+
+.btn-warning:hover {
+    background-color: var(--warning-color);
+    color: white;
+}
+
 .btn-link {
     background: none;
     color: var(--primary-color);
