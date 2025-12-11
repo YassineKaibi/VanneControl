@@ -15,16 +15,13 @@
             </div>
         </div>
 
-        <#assign success = RequestParameters.success!>
-        <#assign error = RequestParameters.error!>
-
-        <#if success == "role_updated">
+        <#if success?? && success == "role_updated">
             <div class="alert alert-success">User role updated successfully.</div>
-        <#elseif success == "history_cleared">
+        <#elseif success?? && success == "history_cleared">
             <div class="alert alert-success">User history and statistics cleared successfully.</div>
         </#if>
 
-        <#if error?has_content>
+        <#if error?? && error?has_content>
             <div class="alert alert-error">Error: ${error}</div>
         </#if>
 

@@ -17,15 +17,7 @@
         </div>
 
         <#-- Display success/error messages from query parameters -->
-        <#if RequestParameters??>
-            <#assign success = RequestParameters.success!"">
-            <#assign error = RequestParameters.error!"">
-        <#else>
-            <#assign success = "">
-            <#assign error = "">
-        </#if>
-
-        <#if success?has_content>
+        <#if success?? && success?has_content>
             <div class="alert alert-success">
                 <#if success == "device_created">
                     ✓ Device created successfully!
@@ -39,7 +31,7 @@
             </div>
         </#if>
 
-        <#if error?has_content>
+        <#if error?? && error?has_content>
             <div class="alert alert-error">
                 <#if error == "missing_fields">
                     ✗ Please fill in all required fields.

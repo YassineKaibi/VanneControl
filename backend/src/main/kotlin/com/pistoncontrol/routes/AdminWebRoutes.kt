@@ -257,11 +257,17 @@ fun Route.adminWebRoutes(deviceService: com.pistoncontrol.services.DeviceService
                 return@get
             }
 
+            // Extract query parameters for success/error messages
+            val success = call.request.queryParameters["success"]
+            val error = call.request.queryParameters["error"]
+
             call.respond(FreeMarkerContent("admin/user-detail.ftl", mapOf(
                 "session" to session,
                 "user" to user,
                 "devices" to emptyList<Any>(),
-                "schedules" to emptyList<Any>()
+                "schedules" to emptyList<Any>(),
+                "success" to success,
+                "error" to error
             )))
         }
 
@@ -420,11 +426,17 @@ fun Route.adminWebRoutes(deviceService: com.pistoncontrol.services.DeviceService
                 limit = 50
             )
 
+            // Extract query parameters for success/error messages
+            val success = call.request.queryParameters["success"]
+            val error = call.request.queryParameters["error"]
+
             call.respond(FreeMarkerContent("admin/user-devices.ftl", mapOf(
                 "session" to session,
                 "user" to user,
                 "devices" to devices,
-                "telemetry" to telemetry
+                "telemetry" to telemetry,
+                "success" to success,
+                "error" to error
             )))
         }
 
