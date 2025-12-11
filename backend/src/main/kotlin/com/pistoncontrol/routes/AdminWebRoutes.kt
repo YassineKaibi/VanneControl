@@ -329,6 +329,33 @@ fun Route.adminWebRoutes(deviceService: com.pistoncontrol.services.DeviceService
         }
 
         /**
+         * POST /admin/users/{id}/clear-history
+         *
+         * Clears all history and statistics for a user (admin form submission)
+         * This deletes all telemetry data associated with the user's devices
+         * Redirects back to user detail page after clearing
+         */
+        post("/users/{id}/clear-history") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+
+            val result = adminService.clearUserHistory(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId
+            )
+
+            when (result) {
+                is AdminService.AdminResult.Success<*> -> {
+                    call.respondRedirect("/admin/users/$userId?success=history_cleared")
+                }
+                is AdminService.AdminResult.Failure -> {
+                    call.respondRedirect("/admin/users/$userId?error=${result.error}")
+                }
+            }
+        }
+
+        /**
          * GET /admin/audit-logs
          *
          * Audit log viewer showing:

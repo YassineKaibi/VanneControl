@@ -15,6 +15,19 @@
             </div>
         </div>
 
+        <#assign success = RequestParameters.success!>
+        <#assign error = RequestParameters.error!>
+
+        <#if success == "role_updated">
+            <div class="alert alert-success">User role updated successfully.</div>
+        <#elseif success == "history_cleared">
+            <div class="alert alert-success">User history and statistics cleared successfully.</div>
+        </#if>
+
+        <#if error?has_content>
+            <div class="alert alert-error">Error: ${error}</div>
+        </#if>
+
         <div class="user-detail-grid">
             <div class="info-card">
                 <h2>User Information</h2>
@@ -78,6 +91,18 @@
                 <hr>
 
                 <h3>Danger Zone</h3>
+
+                <form
+                    method="POST"
+                    action="/admin/users/${user.id}/clear-history"
+                    class="clear-history-form"
+                    onsubmit="return confirm('Are you sure you want to clear all history and statistics for this user? This will delete all telemetry data for their devices. This action cannot be undone.');"
+                >
+                    <button type="submit" class="btn btn-warning">
+                        Clear History & Statistics
+                    </button>
+                </form>
+
                 <form
                     method="POST"
                     action="/admin/users/${user.id}/delete"
@@ -96,6 +121,24 @@
         .header-actions {
             display: flex;
             gap: 10px;
+        }
+
+        .clear-history-form {
+            margin-bottom: 15px;
+        }
+
+        .btn-warning {
+            background-color: #f0ad4e;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 4px;
+            width: 100%;
+        }
+
+        .btn-warning:hover {
+            background-color: #ec971f;
         }
     </style>
 </@layout.layout>

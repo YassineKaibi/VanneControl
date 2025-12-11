@@ -541,4 +541,68 @@ class AdminService(
             else -> AdminResult.Failure("Unexpected error creating device", statusCode = 500)
         }
     }
+
+    /**
+     * Clear all history and statistics for a specific user (admin access)
+     * This deletes all telemetry data associated with the user's devices
+     *
+     * @param adminUserId ID of the admin performing the action
+     * @param targetUserId ID of the user whose history/statistics to clear
+     * @return AdminResult with success or failure
+     */
+    suspend fun clearUserHistory(
+        adminUserId: UUID,
+        targetUserId: UUID
+    ): AdminResult {
+        // Prevent admin from clearing their own history
+        if (adminUserId == targetUserId) {
+            return AdminResult.Failure("Cannot clear your own history", statusCode = 400)
+        }
+
+        // Verify target user exists
+        val targetUser = dbQuery {
+            Users.select { Users.id eq targetUserId }
+                .singleOrNull()
+        }
+
+        if (targetUser == null) {
+            return AdminResult.Failure("User not found", statusCode = 404)
+        }
+
+        val userEmail = targetUser[Users.email]
+
+        // Get all device IDs for the user
+        val userDeviceIds = dbQuery {
+            Devices.select { Devices.ownerId eq targetUserId }
+                .map { it[Devices.id] }
+        }
+
+        // Delete all telemetry data for user's devices
+        val deletedCount = if (userDeviceIds.isNotEmpty()) {
+            dbQuery {
+                Telemetry.deleteWhere { Telemetry.deviceId inList userDeviceIds }
+            }
+        } else {
+            0
+        }
+
+        // Log the action
+        auditLogService.logAction(
+            userId = adminUserId,
+            action = "CLEAR_USER_HISTORY",
+            targetUserId = targetUserId,
+            targetResourceType = "USER",
+            targetResourceId = targetUserId.toString(),
+            details = mapOf(
+                "email" to userEmail,
+                "deletedRecords" to deletedCount.toString(),
+                "deviceCount" to userDeviceIds.size.toString()
+            )
+        )
+
+        return AdminResult.Success(mapOf(
+            "deletedRecords" to deletedCount,
+            "deviceCount" to userDeviceIds.size
+        ))
+    }
 }

@@ -228,6 +228,61 @@ fun Route.adminRoutes(deviceService: com.pistoncontrol.services.DeviceService) {
             }
 
             /**
+             * DELETE /admin/users/{id}/history
+             *
+             * Clear all history and statistics for a user
+             * This deletes all telemetry data associated with the user's devices
+             *
+             * Success Response (200 OK):
+             * {
+             *   "message": "User history cleared successfully",
+             *   "deletedRecords": 125,
+             *   "deviceCount": 3
+             * }
+             */
+            delete("/users/{id}/history") {
+                try {
+                    val principal = call.principal<JWTPrincipal>()!!
+                    val adminUserId = UUID.fromString(principal.payload.getClaim("userId").asString())
+
+                    val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                        ?: return@delete call.respond(
+                            HttpStatusCode.BadRequest,
+                            ErrorResponse("Invalid user ID")
+                        )
+
+                    when (val result = adminService.clearUserHistory(
+                        adminUserId = adminUserId,
+                        targetUserId = userId
+                    )) {
+                        is AdminService.AdminResult.Success<*> -> {
+                            @Suppress("UNCHECKED_CAST")
+                            val data = result.data as Map<String, Int>
+                            call.respond(
+                                HttpStatusCode.OK,
+                                mapOf(
+                                    "message" to "User history cleared successfully",
+                                    "deletedRecords" to data["deletedRecords"],
+                                    "deviceCount" to data["deviceCount"]
+                                )
+                            )
+                        }
+                        is AdminService.AdminResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        ErrorResponse("Failed to clear user history: ${e.message}")
+                    )
+                }
+            }
+
+            /**
              * GET /admin/stats
              *
              * Get system statistics for the admin dashboard
