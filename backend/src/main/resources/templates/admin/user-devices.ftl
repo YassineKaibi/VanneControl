@@ -14,8 +14,13 @@
         </div>
 
         <#-- Display success/error messages from query parameters -->
-        <#assign success = RequestParameters.success!"">
-        <#assign error = RequestParameters.error!"">
+        <#if RequestParameters??>
+            <#assign success = RequestParameters.success!"">
+            <#assign error = RequestParameters.error!"">
+        <#else>
+            <#assign success = "">
+            <#assign error = "">
+        </#if>
 
         <#if success?has_content>
             <div class="alert alert-success">
