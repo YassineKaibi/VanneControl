@@ -13,6 +13,74 @@
             </div>
         </div>
 
+        <#-- Display success/error messages from query parameters -->
+        <#assign success = RequestParameters.success!"">
+        <#assign error = RequestParameters.error!"">
+
+        <#if success?has_content>
+            <div class="alert alert-success">
+                <#if success == "device_created">
+                    ✓ Device created successfully!
+                <#elseif success == "piston_controlled">
+                    ✓ Piston controlled successfully!
+                <#else>
+                    ✓ Operation completed successfully!
+                </#if>
+            </div>
+        </#if>
+
+        <#if error?has_content>
+            <div class="alert alert-error">
+                <#if error == "missing_fields">
+                    ✗ Please fill in all required fields.
+                <#else>
+                    ✗ Error: ${error}
+                </#if>
+            </div>
+        </#if>
+
+        <div class="create-device-section">
+            <h2>Create New Device</h2>
+            <form method="POST" action="/admin/users/${user.id}/devices/create" class="create-device-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="name">Device Name *</label>
+                        <input
+                            type="text"
+                            id="name"
+                            name="name"
+                            placeholder="e.g., Living Room Controller"
+                            required
+                            class="form-control"
+                        />
+                    </div>
+
+                    <div class="form-group">
+                        <label for="mqttClientId">MQTT Client ID *</label>
+                        <input
+                            type="text"
+                            id="mqttClientId"
+                            name="mqttClientId"
+                            placeholder="e.g., device-12345"
+                            required
+                            class="form-control"
+                        />
+                        <small class="form-hint">Must be globally unique across all devices</small>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            Create Device
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <div class="devices-section">
+            <h2>Existing Devices</h2>
+        </div>
+
         <#if devices?? && (devices?size > 0)>
             <#list devices as device>
                 <div class="device-card">
@@ -218,6 +286,98 @@
         .badge-offline {
             background: #6b7280;
             color: white;
+        }
+
+        /* Alert messages */
+        .alert {
+            padding: 15px 20px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .alert-success {
+            background: #ecfdf5;
+            border: 1px solid #10b981;
+            color: #065f46;
+        }
+
+        .alert-error {
+            background: #fef2f2;
+            border: 1px solid #ef4444;
+            color: #991b1b;
+        }
+
+        /* Create device form */
+        .create-device-section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .create-device-section h2 {
+            margin: 0 0 15px 0;
+            font-size: 18px;
+        }
+
+        .create-device-form .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 15px;
+            align-items: end;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            font-weight: 600;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+
+        .form-control {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .form-hint {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        .form-actions {
+            display: flex;
+            align-items: flex-end;
+        }
+
+        .devices-section {
+            margin-top: 0;
+        }
+
+        .devices-section h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .create-device-form .form-row {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </@layout.layout>

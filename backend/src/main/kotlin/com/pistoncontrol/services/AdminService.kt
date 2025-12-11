@@ -480,4 +480,64 @@ class AdminService(
             }
         }
     }
+
+    /**
+     * Create a device for a specific user (admin access)
+     *
+     * @param adminUserId ID of the admin performing the action
+     * @param targetUserId ID of the user who will own the device
+     * @param deviceName Name for the device
+     * @param mqttClientId Unique MQTT client identifier
+     * @return AdminResult with success or failure
+     */
+    suspend fun createDeviceForUser(
+        adminUserId: UUID,
+        targetUserId: UUID,
+        deviceName: String,
+        mqttClientId: String
+    ): AdminResult {
+        // Validate device name
+        if (deviceName.isBlank()) {
+            return AdminResult.Failure("Device name cannot be empty", statusCode = 400)
+        }
+
+        // Validate MQTT client ID
+        if (mqttClientId.isBlank()) {
+            return AdminResult.Failure("MQTT client ID cannot be empty", statusCode = 400)
+        }
+
+        // Verify target user exists
+        val targetUser = dbQuery {
+            Users.select { Users.id eq targetUserId }
+                .singleOrNull()
+        }
+
+        if (targetUser == null) {
+            return AdminResult.Failure("Target user not found", statusCode = 404)
+        }
+
+        // Log the action
+        auditLogService.logAction(
+            userId = adminUserId,
+            action = "CREATE_DEVICE_FOR_USER",
+            targetUserId = targetUserId,
+            targetResourceType = "DEVICE",
+            targetResourceId = mqttClientId,
+            details = mapOf(
+                "deviceName" to deviceName,
+                "mqttClientId" to mqttClientId
+            )
+        )
+
+        // Delegate to DeviceService to create the device
+        return when (val result = deviceService.createDevice(targetUserId, deviceName, mqttClientId)) {
+            is DeviceService.DeviceResult.Success -> {
+                AdminResult.Success(result.device)
+            }
+            is DeviceService.DeviceResult.Failure -> {
+                AdminResult.Failure(result.error, result.statusCode)
+            }
+            else -> AdminResult.Failure("Unexpected error creating device", statusCode = 500)
+        }
+    }
 }

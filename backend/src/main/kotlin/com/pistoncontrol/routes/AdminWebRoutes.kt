@@ -445,6 +445,49 @@ fun Route.adminWebRoutes(deviceService: com.pistoncontrol.services.DeviceService
         }
 
         /**
+         * POST /admin/users/{id}/devices/create
+         *
+         * Create a new device for the specified user (form submission)
+         *
+         * Form parameters:
+         * - name: Device name
+         * - mqttClientId: Unique MQTT client ID
+         */
+        post("/users/{id}/devices/create") {
+            val session = call.sessions.get<AdminSession>()!!
+            val userId = call.parameters["id"]?.let { UUID.fromString(it) }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, "Invalid user ID")
+
+            val params = call.receiveParameters()
+            val deviceName = params["name"]?.trim()
+            val mqttClientId = params["mqttClientId"]?.trim()
+
+            // Validate form inputs
+            if (deviceName.isNullOrBlank() || mqttClientId.isNullOrBlank()) {
+                call.respondRedirect("/admin/users/$userId/devices?error=missing_fields")
+                return@post
+            }
+
+            val result = adminService.createDeviceForUser(
+                adminUserId = UUID.fromString(session.userId),
+                targetUserId = userId,
+                deviceName = deviceName,
+                mqttClientId = mqttClientId
+            )
+
+            when (result) {
+                is AdminService.AdminResult.Success<*> -> {
+                    call.respondRedirect("/admin/users/$userId/devices?success=device_created")
+                }
+                is AdminService.AdminResult.Failure -> {
+                    // URL encode the error message to handle special characters
+                    val encodedError = java.net.URLEncoder.encode(result.error, "UTF-8")
+                    call.respondRedirect("/admin/users/$userId/devices?error=$encodedError")
+                }
+            }
+        }
+
+        /**
          * GET /admin/users/{id}/history
          *
          * Valve activation/deactivation history page showing:

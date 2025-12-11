@@ -385,6 +385,52 @@ fun Route.adminRoutes(deviceService: com.pistoncontrol.services.DeviceService) {
             }
 
             /**
+             * POST /admin/users/{userId}/devices
+             * Create a device for a specific user
+             *
+             * Request body:
+             * {
+             *   "name": "Device Name",
+             *   "mqttClientId": "unique-mqtt-client-id"
+             * }
+             */
+            post("/users/{userId}/devices") {
+                try {
+                    val principal = call.principal<JWTPrincipal>()!!
+                    val adminUserId = UUID.fromString(principal.payload.getClaim("userId").asString())
+                    val targetUserId = call.parameters["userId"]?.let { UUID.fromString(it) }
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Invalid user ID"))
+
+                    val request = call.receive<CreateDeviceRequest>()
+
+                    when (val result = adminService.createDeviceForUser(
+                        adminUserId = adminUserId,
+                        targetUserId = targetUserId,
+                        deviceName = request.name,
+                        mqttClientId = request.mqttClientId
+                    )) {
+                        is AdminService.AdminResult.Success<*> -> {
+                            call.respond(HttpStatusCode.Created, mapOf(
+                                "message" to "Device created successfully",
+                                "device" to result.data
+                            ))
+                        }
+                        is AdminService.AdminResult.Failure -> {
+                            call.respond(
+                                HttpStatusCode.fromValue(result.statusCode),
+                                ErrorResponse(result.error)
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        ErrorResponse("Failed to create device: ${e.message}")
+                    )
+                }
+            }
+
+            /**
              * GET /admin/users/{userId}/telemetry
              * Get telemetry/history for all of a user's devices
              *
