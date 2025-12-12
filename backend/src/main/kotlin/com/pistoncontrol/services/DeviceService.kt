@@ -327,15 +327,25 @@ class DeviceService(private val mqttManager: MqttManager) {
      * Internal helper to fetch pistons for a device
      * Does NOT check ownership - caller must verify first
      *
+     * Returns all 8 pistons (1-8) even if they don't exist in the database yet.
+     * Non-existent pistons are returned with default values (inactive state, null last_triggered).
+     * This enables lazy creation - pistons are created when first activated.
+     *
      * @param deviceId Device UUID
-     * @return List of pistons for the device
+     * @return List of all 8 pistons for the device (some may not exist in DB yet)
      */
     private fun getPistonsForDeviceInternal(deviceId: UUID): List<PistonResponse> {
-        return Pistons.select { Pistons.deviceId eq deviceId }.map {
+        // Fetch existing pistons from database
+        val existingPistons = Pistons.select { Pistons.deviceId eq deviceId }
+            .associate { it[Pistons.pistonNumber] to it }
+
+        // Return all 8 pistons (1-8), using DB values for existing ones and defaults for non-existent
+        return (MIN_PISTON_NUMBER..MAX_PISTON_NUMBER).map { pistonNumber ->
+            val existing = existingPistons[pistonNumber]
             PistonResponse(
-                piston_number = it[Pistons.pistonNumber],
-                state = it[Pistons.state],
-                last_triggered = it[Pistons.lastTriggered]?.toString()
+                piston_number = pistonNumber,
+                state = existing?.get(Pistons.state) ?: "inactive",
+                last_triggered = existing?.get(Pistons.lastTriggered)?.toString()
             )
         }
     }
