@@ -46,6 +46,9 @@ backend/.kotlin/
 *~
 .DS_Store
 
+# Claude Code documentation
+CLAUDE.md
+
 # OS
 Thumbs.db
 .directory
