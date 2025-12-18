@@ -1,0 +1,14 @@
+# Map all commit identities to canonical identity
+# Format: Proper Name <proper@email.com> Commit Name <commit@email.com>
+
+# Map variations to YassineKaibi
+YassineKaibi <kaibi.0yassine@gmail.com> Your Name <kaibi.0yassine@gmail.com>
+YassineKaibi <kaibi.0yassine@gmail.com> ZizyP <kaibi.0yassine@gmail.com>
+YassineKaibi <kaibi.0yassine@gmail.com> Ubuntu <azureuser@vannecontrol-vm.ywkjpxbsxxke1ni4cd1ehjniph.gvxx.internal.cloudapp.net>
+
+# Map any potential Claude commits to YassineKaibi
+YassineKaibi <kaibi.0yassine@gmail.com> Claude <claude@anthropic.com>
+YassineKaibi <kaibi.0yassine@gmail.com> claude <claude@anthropic.com>
+YassineKaibi <kaibi.0yassine@gmail.com> Claude Code <claude@anthropic.com>
+YassineKaibi <kaibi.0yassine@gmail.com> claude <noreply@anthropic.com>
+YassineKaibi <kaibi.0yassine@gmail.com> Claude <noreply@anthropic.com>
