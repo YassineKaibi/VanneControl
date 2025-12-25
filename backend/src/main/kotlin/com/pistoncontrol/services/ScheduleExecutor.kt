@@ -35,15 +35,17 @@ class ScheduleExecutor(
 
         // Start Quartz scheduler
         scheduler.start()
-        logger.info { "Quartz Scheduler started" }
+        logger.info { "Quartz Scheduler started successfully" }
+        logger.info { "Quartz Scheduler state: ${if (scheduler.isStarted) "STARTED" else "NOT STARTED"}" }
 
         // Load and schedule all enabled schedules
         scope.launch {
             try {
                 loadAndScheduleAll()
-                logger.info { "All enabled schedules loaded and scheduled" }
+                val jobCount = scheduler.getJobKeys(org.quartz.impl.matchers.GroupMatcher.anyJobGroup()).size
+                logger.info { "✅ All enabled schedules loaded. Total jobs scheduled: $jobCount" }
             } catch (e: Exception) {
-                logger.error(e) { "Failed to load schedules" }
+                logger.error(e) { "❌ Failed to load schedules" }
             }
         }
 
@@ -70,14 +72,20 @@ class ScheduleExecutor(
      */
     private suspend fun loadAndScheduleAll() {
         val schedules = scheduleService.getEnabledSchedules()
-        logger.info { "Loading ${schedules.size} enabled schedules" }
+        logger.info { "📋 Loading ${schedules.size} enabled schedules from database" }
+
+        if (schedules.isEmpty()) {
+            logger.warn { "⚠️ No enabled schedules found in database. No jobs will be scheduled." }
+            return
+        }
 
         schedules.forEach { schedule ->
             try {
                 addScheduleToQuartz(schedule)
-                logger.info { "Scheduled: ${schedule.name} (${schedule.cronExpression})" }
+                logger.info { "✅ Scheduled: '${schedule.name}' - ${schedule.action} piston ${schedule.pistonNumber} on device ${schedule.deviceId}" }
+                logger.info { "   └─ Cron: ${schedule.cronExpression}" }
             } catch (e: Exception) {
-                logger.error(e) { "Failed to schedule ${schedule.name}" }
+                logger.error(e) { "❌ Failed to schedule '${schedule.name}': ${e.message}" }
             }
         }
     }
@@ -87,15 +95,17 @@ class ScheduleExecutor(
      */
     suspend fun addSchedule(schedule: Schedule) {
         if (!schedule.enabled) {
-            logger.debug { "Schedule ${schedule.id} is disabled, not scheduling" }
+            logger.info { "⏸️ Schedule '${schedule.name}' is DISABLED, not adding to scheduler" }
             return
         }
 
         try {
             addScheduleToQuartz(schedule)
-            logger.info { "Added schedule: ${schedule.name}" }
+            logger.info { "✅ Added schedule to Quartz: '${schedule.name}'" }
+            logger.info { "   └─ ${schedule.action} piston ${schedule.pistonNumber} on device ${schedule.deviceId}" }
+            logger.info { "   └─ Cron: ${schedule.cronExpression}" }
         } catch (e: Exception) {
-            logger.error(e) { "Failed to add schedule ${schedule.id}" }
+            logger.error(e) { "❌ Failed to add schedule '${schedule.name}' (${schedule.id}): ${e.message}" }
             throw e
         }
     }
@@ -179,7 +189,11 @@ class ScheduleExecutor(
             .build()
 
         // Schedule the job
-        scheduler.scheduleJob(jobDetail, trigger)
+        val scheduledTime = scheduler.scheduleJob(jobDetail, trigger)
+
+        logger.info {
+            "📅 Next execution: ${scheduledTime} for '${schedule.name}'"
+        }
 
         logger.debug {
             "Scheduled job: ${schedule.name} for device ${schedule.deviceId}, " +
@@ -200,34 +214,40 @@ class ScheduleExecutor(
             val pistonNumber = dataMap.getInt("pistonNumber")
             val action = dataMap.getString("action")
 
-            logger.info {
-                "⏰ Executing scheduled operation: $scheduleName - " +
-                        "$action piston $pistonNumber on device $deviceId"
-            }
+            logger.info { "═══════════════════════════════════════════════════════════" }
+            logger.info { "⏰ SCHEDULE TRIGGER FIRED" }
+            logger.info { "   Schedule: $scheduleName (ID: $scheduleId)" }
+            logger.info { "   Device: $deviceId" }
+            logger.info { "   Action: $action piston $pistonNumber" }
+            logger.info { "   Time: ${java.time.Instant.now()}" }
+            logger.info { "═══════════════════════════════════════════════════════════" }
 
             try {
                 // Get MQTT manager from job context
+                logger.debug { "Retrieving MqttManager from scheduler context..." }
                 val mqttManager = context.scheduler.context.get("mqttManager") as? MqttManager
 
                 if (mqttManager == null) {
-                    logger.error { "MqttManager not found in scheduler context" }
-                    return
+                    logger.error { "❌ CRITICAL: MqttManager not found in scheduler context!" }
+                    logger.error { "   Scheduler context keys: ${context.scheduler.context.keys.joinToString()}" }
+                    throw JobExecutionException("MqttManager not available")
                 }
+
+                logger.debug { "✅ MqttManager retrieved successfully" }
 
                 // Build command string (e.g., "activate:3" or "deactivate:5")
                 val command = "${action.lowercase()}:$pistonNumber"
+                logger.info { "📤 Publishing MQTT command: $command to device $deviceId" }
 
                 // Publish command via MQTT
                 mqttManager.publishCommand(deviceId, command, useBinary = true)
 
-                logger.info {
-                    "✅ Successfully executed schedule: $scheduleName - " +
-                            "sent $action command for piston $pistonNumber"
-                }
+                logger.info { "✅ SUCCESS: Schedule '$scheduleName' executed - sent $action command for piston $pistonNumber" }
 
             } catch (e: Exception) {
                 logger.error(e) {
-                    "❌ Failed to execute schedule $scheduleName: ${e.message}"
+                    "❌ FAILED to execute schedule '$scheduleName': ${e.message}\n" +
+                    "   Stack trace: ${e.stackTraceToString()}"
                 }
                 throw JobExecutionException(e)
             }
@@ -239,5 +259,7 @@ class ScheduleExecutor(
      */
     fun setMqttManager(mqttManager: MqttManager) {
         scheduler.context.put("mqttManager", mqttManager)
+        logger.info { "✅ MqttManager stored in scheduler context" }
+        logger.debug { "   Scheduler context now contains: ${scheduler.context.keys.joinToString()}" }
     }
 }

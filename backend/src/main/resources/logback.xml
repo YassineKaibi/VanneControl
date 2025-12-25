@@ -10,8 +10,8 @@
     <!-- Set Hikari to only show WARN and ERROR -->
     <logger name="com.zaxxer.hikari" level="WARN"/>
 
-    <!-- Set Quartz to only show WARN and ERROR -->
-    <logger name="org.quartz" level="WARN"/>
+    <!-- Set Quartz to INFO to see scheduler activity -->
+    <logger name="org.quartz" level="INFO"/>
 
     <!-- Set Exposed to only show WARN and ERROR -->
     <logger name="Exposed" level="WARN"/>
