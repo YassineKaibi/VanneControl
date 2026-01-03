@@ -12,6 +12,10 @@ import mu.KotlinLogging
 import java.io.File
 import java.util.UUID
 import kotlinx.serialization.Serializable
+import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import com.pistoncontrol.database.Users
+import com.pistoncontrol.database.DatabaseFactory
 
 private val logger = KotlinLogging.logger {}
 
@@ -181,50 +185,49 @@ fun Route.avatarRoutes(baseUrl: String) {
                     val multipart = call.receiveMultipart()
                     var avatarFile: File? = null
                     var savedExtension: String? = null
+                    var validationError: String? = null
 
                     multipart.forEachPart { part ->
                         when (part) {
                             is PartData.FileItem -> {
-                                if (part.name == "avatar") {
+                                if (part.name == "avatar" && validationError == null) {
                                     // Validate content type
                                     val contentType = part.contentType
                                     if (contentType == null || contentType !in ALLOWED_CONTENT_TYPES) {
+                                        validationError = "Invalid file type. Allowed: JPG, PNG, WebP"
                                         part.dispose()
-                                        call.respond(
-                                            HttpStatusCode.BadRequest,
-                                            ErrorResponse("Invalid file type. Allowed: JPG, PNG, WebP")
-                                        )
-                                        return@post
+                                    } else {
+                                        // Read file bytes
+                                        val fileBytes = part.streamProvider().readBytes()
+
+                                        // Validate size
+                                        if (fileBytes.size > MAX_FILE_SIZE) {
+                                            validationError = "File too large. Maximum size: 5MB"
+                                            part.dispose()
+                                        } else {
+                                            // Delete existing avatars for this user
+                                            deleteExistingAvatars(userId, uploadsDir)
+
+                                            // Save new avatar
+                                            savedExtension = getExtensionFromContentType(contentType)
+                                            val filename = "$userId.$savedExtension"
+                                            avatarFile = File(uploadsDir, filename)
+                                            avatarFile!!.writeBytes(fileBytes)
+
+                                            logger.info { "Saved avatar: $filename (${fileBytes.size} bytes)" }
+                                        }
                                     }
-
-                                    // Read file bytes
-                                    val fileBytes = part.streamProvider().readBytes()
-
-                                    // Validate size
-                                    if (fileBytes.size > MAX_FILE_SIZE) {
-                                        part.dispose()
-                                        call.respond(
-                                            HttpStatusCode.BadRequest,
-                                            ErrorResponse("File too large. Maximum size: 5MB")
-                                        )
-                                        return@post
-                                    }
-
-                                    // Delete existing avatars for this user
-                                    deleteExistingAvatars(userId, uploadsDir)
-
-                                    // Save new avatar
-                                    savedExtension = getExtensionFromContentType(contentType)
-                                    val filename = "$userId.$savedExtension"
-                                    avatarFile = File(uploadsDir, filename)
-                                    avatarFile!!.writeBytes(fileBytes)
-
-                                    logger.info { "Saved avatar: $filename (${fileBytes.size} bytes)" }
                                 }
                             }
                             else -> {}
                         }
                         part.dispose()
+                    }
+
+                    // Check for validation errors
+                    if (validationError != null) {
+                        call.respond(HttpStatusCode.BadRequest, ErrorResponse(validationError))
+                        return@post
                     }
 
                     if (avatarFile == null || savedExtension == null) {
@@ -301,11 +304,9 @@ fun Route.avatarRoutes(baseUrl: String) {
  * Update user's avatarUrl in database
  */
 private suspend fun updateUserAvatarUrl(userId: String, avatarUrl: String?) {
-    com.pistoncontrol.database.DatabaseFactory.dbQuery {
-        com.pistoncontrol.database.Users.update(
-            { com.pistoncontrol.database.Users.id eq UUID.fromString(userId) }
-        ) {
-            it[com.pistoncontrol.database.Users.avatarUrl] = avatarUrl
+    DatabaseFactory.dbQuery {
+        Users.update({ Users.id eq UUID.fromString(userId) }) {
+            it[Users.avatarUrl] = avatarUrl
         }
     }
     logger.info { "Updated avatarUrl for user $userId: $avatarUrl" }
