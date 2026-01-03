@@ -76,10 +76,11 @@ class ScheduleService {
         }
 
         // Validate cron expression
-        if (!isValidCronExpression(request.cronExpression)) {
-            logger.warn { "Invalid cron expression: ${request.cronExpression}" }
+        val cronValidation = validateCronExpression(request.cronExpression)
+        if (!cronValidation.isValid) {
+            logger.warn { "Invalid cron expression: ${request.cronExpression} - ${cronValidation.error}" }
             return ScheduleResult.Failure(
-                "Invalid cron expression format",
+                cronValidation.error ?: "Invalid cron expression format",
                 statusCode = 400
             )
         }
@@ -204,12 +205,15 @@ class ScheduleService {
         }
 
         // Validate cron expression if provided
-        if (request.cronExpression != null && !isValidCronExpression(request.cronExpression)) {
-            logger.warn { "Invalid cron expression: ${request.cronExpression}" }
-            return ScheduleResult.Failure(
-                "Invalid cron expression format",
-                statusCode = 400
-            )
+        if (request.cronExpression != null) {
+            val cronValidation = validateCronExpression(request.cronExpression)
+            if (!cronValidation.isValid) {
+                logger.warn { "Invalid cron expression: ${request.cronExpression} - ${cronValidation.error}" }
+                return ScheduleResult.Failure(
+                    cronValidation.error ?: "Invalid cron expression format",
+                    statusCode = 400
+                )
+            }
         }
 
         val updatedSchedule = dbQuery {
@@ -313,13 +317,49 @@ class ScheduleService {
     }
 
     /**
-     * Validate cron expression using Quartz
+     * Result of cron expression validation
      */
-    private fun isValidCronExpression(cronExpression: String): Boolean {
+    private data class CronValidationResult(
+        val isValid: Boolean,
+        val error: String? = null,
+        val nextFireTime: java.util.Date? = null
+    )
+
+    /**
+     * Validate cron expression using Quartz
+     * Checks both syntax and that expression will fire in the future
+     */
+    private fun validateCronExpression(cronExpression: String): CronValidationResult {
         return try {
-            CronExpression.isValidExpression(cronExpression)
+            // First check syntax
+            if (!CronExpression.isValidExpression(cronExpression)) {
+                logger.debug { "Cron expression syntax is invalid: $cronExpression" }
+                return CronValidationResult(
+                    isValid = false,
+                    error = "Invalid cron expression syntax. Expected format: 'second minute hour day month day-of-week [year]'"
+                )
+            }
+
+            // Then check if it will actually fire in the future
+            val cron = CronExpression(cronExpression)
+            val nextFireTime = cron.getNextValidTimeAfter(java.util.Date())
+
+            if (nextFireTime == null) {
+                logger.debug { "Cron expression will never fire: $cronExpression" }
+                return CronValidationResult(
+                    isValid = false,
+                    error = "Cron expression will never fire. This usually means the specified time is in the past."
+                )
+            }
+
+            logger.debug { "Cron expression is valid. Next fire time: $nextFireTime" }
+            CronValidationResult(isValid = true, nextFireTime = nextFireTime)
         } catch (e: Exception) {
-            false
+            logger.debug(e) { "Error validating cron expression: $cronExpression" }
+            CronValidationResult(
+                isValid = false,
+                error = "Invalid cron expression: ${e.message}"
+            )
         }
     }
 }

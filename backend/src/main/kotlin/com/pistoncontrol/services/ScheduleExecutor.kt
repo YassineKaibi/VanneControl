@@ -79,13 +79,28 @@ class ScheduleExecutor(
             return
         }
 
+        var successCount = 0
+        var failureCount = 0
+
         schedules.forEach { schedule ->
             try {
                 addScheduleToQuartz(schedule)
                 logger.info { "✅ Scheduled: '${schedule.name}' - ${schedule.action} piston ${schedule.pistonNumber} on device ${schedule.deviceId}" }
                 logger.info { "   └─ Cron: ${schedule.cronExpression}" }
+                successCount++
             } catch (e: Exception) {
                 logger.error(e) { "❌ Failed to schedule '${schedule.name}': ${e.message}" }
+                failureCount++
+            }
+        }
+
+        logger.info {
+            "📊 Schedule loading complete: $successCount succeeded, $failureCount failed out of ${schedules.size} total"
+        }
+
+        if (failureCount > 0) {
+            logger.warn {
+                "⚠️ Some schedules failed to load. Check the errors above and update/disable problematic schedules in the database."
             }
         }
     }
@@ -188,8 +203,23 @@ class ScheduleExecutor(
             )
             .build()
 
-        // Schedule the job
-        val scheduledTime = scheduler.scheduleJob(jobDetail, trigger)
+        // Schedule the job - this may throw SchedulerException if trigger will never fire
+        val scheduledTime = try {
+            scheduler.scheduleJob(jobDetail, trigger)
+        } catch (e: SchedulerException) {
+            if (e.message?.contains("will never fire") == true) {
+                // This typically happens when cron expression represents a past time
+                logger.warn {
+                    "⚠️ Schedule '${schedule.name}' (${schedule.id}) has a cron expression that will never fire.\n" +
+                    "   Cron: ${schedule.cronExpression}\n" +
+                    "   This schedule will be skipped. Consider updating or disabling it in the database."
+                }
+                throw SchedulerException("Schedule will never fire: ${schedule.cronExpression}", e)
+            } else {
+                // Re-throw other scheduler exceptions
+                throw e
+            }
+        }
 
         logger.info {
             "📅 Next execution: ${scheduledTime} for '${schedule.name}'"
