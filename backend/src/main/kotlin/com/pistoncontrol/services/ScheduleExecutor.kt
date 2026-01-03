@@ -81,6 +81,7 @@ class ScheduleExecutor(
 
         var successCount = 0
         var failureCount = 0
+        var autoDisabledCount = 0
 
         schedules.forEach { schedule ->
             try {
@@ -88,6 +89,29 @@ class ScheduleExecutor(
                 logger.info { "✅ Scheduled: '${schedule.name}' - ${schedule.action} piston ${schedule.pistonNumber} on device ${schedule.deviceId}" }
                 logger.info { "   └─ Cron: ${schedule.cronExpression}" }
                 successCount++
+            } catch (e: SchedulerException) {
+                // Check if this is a "will never fire" error
+                if (e.message?.contains("will never fire") == true) {
+                    logger.warn {
+                        "⚠️ Schedule '${schedule.name}' (${schedule.id}) will never fire - auto-disabling\n" +
+                        "   Cron: ${schedule.cronExpression}\n" +
+                        "   This usually means the schedule was for a past date/time."
+                    }
+
+                    // Auto-disable the schedule in the database
+                    val disabled = scheduleService.disableScheduleBySystem(schedule.id)
+                    if (disabled) {
+                        logger.info { "   └─ ✅ Schedule automatically disabled in database" }
+                        autoDisabledCount++
+                    } else {
+                        logger.error { "   └─ ❌ Failed to auto-disable schedule in database" }
+                        failureCount++
+                    }
+                } else {
+                    // Other scheduler exceptions
+                    logger.error(e) { "❌ Failed to schedule '${schedule.name}': ${e.message}" }
+                    failureCount++
+                }
             } catch (e: Exception) {
                 logger.error(e) { "❌ Failed to schedule '${schedule.name}': ${e.message}" }
                 failureCount++
@@ -95,7 +119,13 @@ class ScheduleExecutor(
         }
 
         logger.info {
-            "📊 Schedule loading complete: $successCount succeeded, $failureCount failed out of ${schedules.size} total"
+            "📊 Schedule loading complete: $successCount succeeded, $failureCount failed, $autoDisabledCount auto-disabled out of ${schedules.size} total"
+        }
+
+        if (autoDisabledCount > 0) {
+            logger.info {
+                "ℹ️ $autoDisabledCount expired schedule(s) were automatically disabled. They will no longer appear on server restart."
+            }
         }
 
         if (failureCount > 0) {

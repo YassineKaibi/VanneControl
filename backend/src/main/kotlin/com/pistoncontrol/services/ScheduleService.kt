@@ -299,6 +299,49 @@ class ScheduleService {
     }
 
     /**
+     * Disable a schedule (system operation, no ownership verification)
+     *
+     * This is used by the scheduler system to automatically disable schedules
+     * that will never fire (e.g., past one-time schedules).
+     *
+     * @param scheduleId Schedule UUID
+     * @return true if successfully disabled, false if schedule not found
+     */
+    suspend fun disableScheduleBySystem(scheduleId: String): Boolean {
+        return dbQuery {
+            try {
+                val scheduleUuid = UUID.fromString(scheduleId)
+
+                // Check if schedule exists
+                val existingSchedule = Schedules.select {
+                    Schedules.id eq scheduleUuid
+                }.singleOrNull()
+
+                if (existingSchedule == null) {
+                    logger.warn { "Cannot disable schedule $scheduleId - not found" }
+                    return@dbQuery false
+                }
+
+                // Disable the schedule
+                val updatedCount = Schedules.update({ Schedules.id eq scheduleUuid }) {
+                    it[enabled] = false
+                    it[updatedAt] = Instant.now()
+                }
+
+                if (updatedCount > 0) {
+                    logger.info { "System auto-disabled schedule $scheduleId (will never fire)" }
+                    true
+                } else {
+                    false
+                }
+            } catch (e: Exception) {
+                logger.error(e) { "Error disabling schedule $scheduleId" }
+                false
+            }
+        }
+    }
+
+    /**
      * Convert database row to Schedule model
      */
     private fun rowToSchedule(row: ResultRow): Schedule {
