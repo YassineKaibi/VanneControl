@@ -31,6 +31,10 @@ fun Application.configureRouting(
     val jwtIssuer = environment.config.property("jwt.issuer").getString()
     val jwtAudience = environment.config.property("jwt.audience").getString()
 
+    // Get base URL for avatar URLs (used in responses)
+    val baseUrl = environment.config.propertyOrNull("server.baseUrl")?.getString()
+        ?: "http://localhost:8080/"
+
     val wsManager = WebSocketManager(mqttManager)
     wsManager.startMqttForwarding()
 
@@ -61,7 +65,8 @@ fun Application.configureRouting(
         scheduleRoutes(scheduleService, scheduleExecutor)
         adminRoutes(deviceService)
         adminWebRoutes(deviceService)  // Admin web dashboard (HTML pages)
-        
+        avatarRoutes(baseUrl)  // Avatar upload and serving routes
+
         authenticate("auth-jwt") {
             get("/devices/{id}/stats") {
                 val deviceId = call.parameters["id"] ?: return@get call.respond(

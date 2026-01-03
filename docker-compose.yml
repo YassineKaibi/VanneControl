@@ -67,7 +67,12 @@ services:
       JWT_AUDIENCE: ${JWT_AUDIENCE}      # ← ADDED
       SESSION_ENCRYPT_KEY: ${SESSION_ENCRYPT_KEY}
       SESSION_SIGN_KEY: ${SESSION_SIGN_KEY}
+      # Avatar upload configuration
+      SERVER_BASE_URL: ${SERVER_BASE_URL:-http://localhost:8080/}
       TZ: UTC
+    volumes:
+      # Persist uploaded avatars across container restarts
+      - avatar_uploads:/app/uploads
     ports:
       - "8080:8080"
     depends_on:
@@ -135,6 +140,9 @@ volumes:
   mosquitto_data:
     driver: local
   mosquitto_log:
+    driver: local
+  # New volume for avatar uploads persistence
+  avatar_uploads:
     driver: local
 
 networks:

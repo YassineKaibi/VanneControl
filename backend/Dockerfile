@@ -38,6 +38,10 @@ RUN addgroup -g 1000 ktor && \
 # Set working directory
 WORKDIR /app
 
+# Create uploads directory for avatars with proper permissions
+RUN mkdir -p /app/uploads/avatars && \
+    chown -R ktor:ktor /app/uploads
+
 # Copy the built JAR from build stage
 COPY --from=build --chown=ktor:ktor /app/build/libs/*-all.jar app.jar
 
