@@ -64,6 +64,9 @@ dependencies {
     
     // Password Hashing
     implementation("org.mindrot:jbcrypt:0.4")
+
+    // Email (Jakarta Mail for SMTP)
+    implementation("com.sun.mail:jakarta.mail:2.0.1")
     
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
