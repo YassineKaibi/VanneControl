@@ -70,6 +70,11 @@ services:
       # Avatar upload configuration
       SERVER_BASE_URL: ${SERVER_BASE_URL:-http://localhost:8080/}
       TZ: UTC
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@vannecontrol.com}
     volumes:
       # Persist uploaded avatars across container restarts
       - avatar_uploads:/app/uploads
@@ -111,6 +116,17 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Mailpit (local SMTP server for development)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: piston-mailpit
+    restart: unless-stopped
+    ports:
+      - "8025:8025"   # Web UI
+      - "1025:1025"   # SMTP
+    networks:
+      - piston-network
 
   # Redis Cache
   redis:

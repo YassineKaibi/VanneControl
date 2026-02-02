@@ -2,6 +2,7 @@ package com.pistoncontrol.plugins
 
 import com.pistoncontrol.mqtt.MqttManager
 import com.pistoncontrol.services.DeviceMessageHandler
+import com.pistoncontrol.services.EmailService
 import com.pistoncontrol.services.UserService
 import com.pistoncontrol.routes.*
 import com.pistoncontrol.websocket.WebSocketManager
@@ -25,7 +26,8 @@ fun Application.configureRouting(
     mqttManager: MqttManager,
     messageHandler: DeviceMessageHandler,
     scheduleService: com.pistoncontrol.services.ScheduleService,
-    scheduleExecutor: com.pistoncontrol.services.ScheduleExecutor
+    scheduleExecutor: com.pistoncontrol.services.ScheduleExecutor,
+    emailService: EmailService
 ) {
     val jwtSecret = environment.config.property("jwt.secret").getString()
     val jwtIssuer = environment.config.property("jwt.issuer").getString()
@@ -55,7 +57,7 @@ fun Application.configureRouting(
             call.respond(HttpStatusCode.OK)
         }
 
-        authRoutes(jwtSecret, jwtIssuer, jwtAudience)
+        authRoutes(jwtSecret, jwtIssuer, jwtAudience, emailService)
 
         // Create DeviceService for device and admin routes
         val deviceService = com.pistoncontrol.services.DeviceService(mqttManager)

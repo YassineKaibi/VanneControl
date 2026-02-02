@@ -3,6 +3,7 @@ package com.pistoncontrol
 import com.pistoncontrol.database.DatabaseFactory
 import com.pistoncontrol.mqtt.MqttManager
 import com.pistoncontrol.services.DeviceMessageHandler
+import com.pistoncontrol.services.EmailService
 import com.pistoncontrol.plugins.*
 import io.ktor.server.application.*
 import io.ktor.server.netty.*
@@ -88,7 +89,19 @@ fun Application.module() {
     } catch (e: Exception) {
         logger.error(e) { "❌ Failed to start Schedule Executor" }
     }
-    
+
+    // ════════════════════════════════════════════════════════════════
+    // STEP 3.6: Initialize Email Service (SMTP)
+    // ════════════════════════════════════════════════════════════════
+    val emailService = EmailService(
+        smtpHost = System.getenv("SMTP_HOST") ?: "",
+        smtpPort = (System.getenv("SMTP_PORT") ?: "587").toInt(),
+        smtpUsername = System.getenv("SMTP_USERNAME") ?: "",
+        smtpPassword = System.getenv("SMTP_PASSWORD") ?: "",
+        fromAddress = System.getenv("SMTP_FROM") ?: "noreply@vannecontrol.com"
+    )
+    logger.info { "✅ Email Service configured" }
+
     // ════════════════════════════════════════════════════════════════
     // STEP 4: Configure Ktor Plugins
     // ════════════════════════════════════════════════════════════════
@@ -114,7 +127,7 @@ fun Application.module() {
     configureMonitoring()
     logger.info { "✅ Request monitoring configured" }
 
-    configureRouting(mqttManager, messageHandler, scheduleService, scheduleExecutor)
+    configureRouting(mqttManager, messageHandler, scheduleService, scheduleExecutor, emailService)
     logger.info { "✅ REST API routes configured" }
 
     // ════════════════════════════════════════════════════════════════
