@@ -32,6 +32,15 @@ data class ErrorResponse(
 }
 
 @Serializable
+data class VerifyEmailRequest(val userId: String, val code: String)
+
+@Serializable
+data class ResendCodeRequest(val userId: String)
+
+@Serializable
+data class RegisterResponse(val userId: String, val message: String)
+
+@Serializable
 data class PistonCommand(
     val action: String
 )

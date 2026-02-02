@@ -3,91 +3,58 @@ package com.pistoncontrol.services
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.pistoncontrol.database.DatabaseFactory.dbQuery
+import com.pistoncontrol.database.EmailVerificationCodes
 import com.pistoncontrol.database.Users
+import mu.KotlinLogging
 import org.jetbrains.exposed.sql.*
 import org.mindrot.jbcrypt.BCrypt
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.time.Instant
 import java.util.Date
 import java.util.UUID
 
-/**
- * AuthService - Centralized Authentication Business Logic
- *
- * This service handles all authentication-related operations including:
- * - User registration with secure password hashing
- * - User login with credential verification
- * - JWT token generation
- * - Password complexity validation
- *
- * Security Notes:
- * - Uses BCrypt for password hashing with automatic salt generation
- * - BCrypt is intentionally slow (~250ms) to prevent brute-force attacks
- * - Timing-safe password comparison to prevent timing attacks
- * - JWT tokens expire after 24 hours
- */
+private val logger = KotlinLogging.logger {}
+
 class AuthService(
     private val jwtSecret: String,
     private val jwtIssuer: String,
-    private val jwtAudience: String
+    private val jwtAudience: String,
+    private val emailService: EmailService
 ) {
     companion object {
         private const val TOKEN_EXPIRY_MS = 86400000L // 24 hours
         private const val MIN_PASSWORD_LENGTH = 8
+        private const val OTP_LENGTH = 6
+        private const val OTP_EXPIRY_MINUTES = 15L
+        private const val MAX_VERIFY_ATTEMPTS = 5
+        private const val MAX_RESEND_PER_HOUR = 3
     }
 
-    /**
-     * Sealed class for type-safe authentication results
-     * Eliminates the need for null checks and exception handling in routes
-     */
     sealed class AuthResult {
         data class Success(val token: String, val userId: String) : AuthResult()
+        data class VerificationRequired(val userId: String, val message: String) : AuthResult()
         data class Failure(val error: String, val statusCode: Int = 400) : AuthResult()
     }
 
-    /**
-     * Register a new user with email and password
-     *
-     * Process:
-     * 1. Validate email format
-     * 2. Validate password complexity
-     * 3. Check if email already exists
-     * 4. Hash password using BCrypt (auto-generated salt)
-     * 5. Insert user into database
-     * 6. Generate JWT token
-     *
-     * @param firstName User's first name
-     * @param lastName User's last name
-     * @param email User's email address
-     * @param phoneNumber User's phone number
-     * @param password User's plaintext password (will be hashed)
-     * @return AuthResult.Success with token, or AuthResult.Failure with error
-     */
     suspend fun register(firstName: String, lastName: String, email: String, phoneNumber: String, password: String): AuthResult {
-        // Validate email format
         if (!isValidEmail(email)) {
             return AuthResult.Failure("Invalid email format")
         }
 
-        // Validate password complexity
         val passwordError = validatePassword(password)
         if (passwordError != null) {
             return AuthResult.Failure(passwordError)
         }
 
-        // Hash password using BCrypt
-        // BCrypt automatically generates a unique salt for each password
-        // The salt is stored as part of the hash, no separate storage needed
         val hashedPassword = hashPassword(password)
 
-        // Insert user into database
         val userId = dbQuery {
-            // Check if email already exists
             val existingUser = findUserByEmail(email)
             if (existingUser != null) {
                 return@dbQuery null
             }
 
-            // Create new user
             Users.insert {
                 it[Users.email] = email
                 it[Users.passwordHash] = hashedPassword
@@ -95,70 +62,171 @@ class AuthService(
                 it[Users.firstName] = firstName
                 it[Users.lastName] = lastName
                 it[Users.phoneNumber] = phoneNumber
+                it[Users.emailVerified] = false
                 it[Users.createdAt] = Instant.now()
                 it[Users.updatedAt] = Instant.now()
             } get Users.id
         }
 
-        // Check if registration succeeded
         if (userId == null) {
             return AuthResult.Failure("Email already registered", statusCode = 409)
         }
 
-        // Generate JWT token with role
-        val token = generateToken(userId, "user")
-        return AuthResult.Success(token, userId.toString())
+        val otpCode = generateOtpCode()
+        storeVerificationCode(userId, otpCode)
+
+        try {
+            emailService.sendVerificationCode(email, otpCode, firstName)
+        } catch (e: Exception) {
+            logger.error(e) { "Failed to send verification email to $email" }
+        }
+
+        return AuthResult.VerificationRequired(userId.toString(), "Registration successful. Please verify your email with the code sent to $email")
     }
 
-    /**
-     * Authenticate user with email and password
-     *
-     * Process:
-     * 1. Look up user by email
-     * 2. Verify password using BCrypt (timing-safe comparison)
-     * 3. Generate JWT token if credentials are valid
-     *
-     * Security Note:
-     * BCrypt.checkpw() is timing-safe, preventing timing attacks
-     * that could reveal whether a user exists
-     *
-     * @param email User's email address
-     * @param password User's plaintext password
-     * @return AuthResult.Success with token, or AuthResult.Failure with error
-     */
     suspend fun login(email: String, password: String): AuthResult {
         val user = dbQuery {
             findUserByEmail(email)
         }
 
-        // Use timing-safe comparison to prevent timing attacks
-        // BCrypt.checkpw takes similar time whether password is correct or not
         if (user == null || !verifyPassword(password, user[Users.passwordHash])) {
-            // Generic error message to prevent user enumeration
             return AuthResult.Failure("Invalid credentials", statusCode = 401)
         }
 
-        // Generate JWT token with role
+        if (!user[Users.emailVerified]) {
+            return AuthResult.Failure("Email not verified. Please verify your email before logging in.", statusCode = 403)
+        }
+
         val userId = user[Users.id]
         val role = user[Users.role]
         val token = generateToken(userId, role)
         return AuthResult.Success(token, userId.toString())
     }
 
-    /**
-     * Generate JWT token for authenticated user
-     *
-     * Token structure:
-     * - Audience: Application identifier
-     * - Issuer: Service that created the token
-     * - Claim: userId for user identification
-     * - Claim: role for authorization checks
-     * - Expiration: 24 hours from creation
-     *
-     * @param userId User's UUID
-     * @param role User's role (user/admin)
-     * @return JWT token string
-     */
+    suspend fun verifyEmail(userId: String, code: String): AuthResult {
+        val userUuid: UUID
+        try {
+            userUuid = UUID.fromString(userId)
+        } catch (e: IllegalArgumentException) {
+            return AuthResult.Failure("Invalid user ID format", statusCode = 400)
+        }
+
+        return dbQuery {
+            val user = Users.select { Users.id eq userUuid }.singleOrNull()
+                ?: return@dbQuery AuthResult.Failure("User not found", statusCode = 404)
+
+            if (user[Users.emailVerified]) {
+                return@dbQuery AuthResult.Failure("Email already verified", statusCode = 409)
+            }
+
+            val verificationCode = EmailVerificationCodes
+                .select { EmailVerificationCodes.userId eq userUuid }
+                .orderBy(EmailVerificationCodes.createdAt, SortOrder.DESC)
+                .limit(1)
+                .singleOrNull()
+                ?: return@dbQuery AuthResult.Failure("No verification code found. Please request a new one.", statusCode = 404)
+
+            if (verificationCode[EmailVerificationCodes.expiresAt].isBefore(Instant.now())) {
+                EmailVerificationCodes.deleteWhere { SqlExpressionBuilder.run { EmailVerificationCodes.userId eq userUuid } }
+                return@dbQuery AuthResult.Failure("Verification code expired. Please request a new one.", statusCode = 410)
+            }
+
+            val currentAttempts = verificationCode[EmailVerificationCodes.attempts]
+            if (currentAttempts >= MAX_VERIFY_ATTEMPTS) {
+                EmailVerificationCodes.deleteWhere { SqlExpressionBuilder.run { EmailVerificationCodes.userId eq userUuid } }
+                return@dbQuery AuthResult.Failure("Too many failed attempts. Please request a new code.", statusCode = 429)
+            }
+
+            EmailVerificationCodes.update({ EmailVerificationCodes.id eq verificationCode[EmailVerificationCodes.id] }) {
+                it[attempts] = currentAttempts + 1
+            }
+
+            val codeHash = hashCode(code)
+            if (codeHash != verificationCode[EmailVerificationCodes.codeHash]) {
+                val remaining = MAX_VERIFY_ATTEMPTS - (currentAttempts + 1)
+                return@dbQuery AuthResult.Failure("Invalid verification code. $remaining attempts remaining.", statusCode = 400)
+            }
+
+            Users.update({ Users.id eq userUuid }) {
+                it[emailVerified] = true
+                it[updatedAt] = Instant.now()
+            }
+
+            EmailVerificationCodes.deleteWhere { SqlExpressionBuilder.run { EmailVerificationCodes.userId eq userUuid } }
+
+            val role = user[Users.role]
+            val token = generateToken(userUuid, role)
+            AuthResult.Success(token, userId)
+        }
+    }
+
+    suspend fun resendVerificationCode(userId: String): AuthResult {
+        val userUuid: UUID
+        try {
+            userUuid = UUID.fromString(userId)
+        } catch (e: IllegalArgumentException) {
+            return AuthResult.Failure("Invalid user ID format", statusCode = 400)
+        }
+
+        val user = dbQuery {
+            Users.select { Users.id eq userUuid }.singleOrNull()
+        } ?: return AuthResult.Failure("User not found", statusCode = 404)
+
+        if (user[Users.emailVerified]) {
+            return AuthResult.Failure("Email already verified", statusCode = 409)
+        }
+
+        val recentCodesCount = dbQuery {
+            val oneHourAgo = Instant.now().minusSeconds(3600)
+            EmailVerificationCodes
+                .select { (EmailVerificationCodes.userId eq userUuid) and (EmailVerificationCodes.createdAt greaterEq oneHourAgo) }
+                .count()
+        }
+
+        if (recentCodesCount >= MAX_RESEND_PER_HOUR) {
+            return AuthResult.Failure("Too many code requests. Please wait before requesting a new code.", statusCode = 429)
+        }
+
+        val otpCode = generateOtpCode()
+        storeVerificationCode(userUuid, otpCode)
+
+        val email = user[Users.email]
+        val firstName = user[Users.firstName]
+
+        try {
+            emailService.sendVerificationCode(email, otpCode, firstName)
+        } catch (e: Exception) {
+            logger.error(e) { "Failed to send verification email to $email" }
+            return AuthResult.Failure("Failed to send verification email. Please try again later.", statusCode = 500)
+        }
+
+        return AuthResult.VerificationRequired(userId, "Verification code sent to $email")
+    }
+
+    private fun generateOtpCode(): String {
+        val code = SecureRandom().nextInt(900000) + 100000
+        return code.toString()
+    }
+
+    private fun hashCode(code: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(code.toByteArray())
+        return hashBytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private suspend fun storeVerificationCode(userId: UUID, code: String) {
+        val codeHash = hashCode(code)
+        dbQuery {
+            EmailVerificationCodes.insert {
+                it[EmailVerificationCodes.userId] = userId
+                it[EmailVerificationCodes.codeHash] = codeHash
+                it[EmailVerificationCodes.attempts] = 0
+                it[EmailVerificationCodes.expiresAt] = Instant.now().plusSeconds(OTP_EXPIRY_MINUTES * 60)
+                it[EmailVerificationCodes.createdAt] = Instant.now()
+            }
+        }
+    }
+
     private fun generateToken(userId: UUID, role: String): String {
         return JWT.create()
             .withAudience(jwtAudience)
@@ -169,71 +237,22 @@ class AuthService(
             .sign(Algorithm.HMAC256(jwtSecret))
     }
 
-    /**
-     * Hash password using BCrypt
-     *
-     * BCrypt Security Features:
-     * - Automatically generates unique salt for each password
-     * - Salt is embedded in the hash output (no separate storage)
-     * - Intentionally slow (~250ms) to prevent brute-force attacks
-     * - Industry-standard password hashing algorithm
-     *
-     * @param plaintext Plaintext password
-     * @return BCrypt hash (includes salt)
-     */
     private fun hashPassword(plaintext: String): String {
         return BCrypt.hashpw(plaintext, BCrypt.gensalt())
     }
 
-    /**
-     * Verify password against BCrypt hash
-     *
-     * Timing-safe comparison that prevents timing attacks
-     * Takes similar time whether password is correct or incorrect
-     *
-     * @param plaintext Plaintext password to verify
-     * @param hash BCrypt hash from database
-     * @return true if password matches, false otherwise
-     */
     private fun verifyPassword(plaintext: String, hash: String): Boolean {
         return BCrypt.checkpw(plaintext, hash)
     }
 
-    /**
-     * Find user by email address
-     *
-     * @param email Email to search for
-     * @return ResultRow if user exists, null otherwise
-     */
     private fun findUserByEmail(email: String): ResultRow? {
         return Users.select { Users.email eq email }.singleOrNull()
     }
 
-    /**
-     * Validate email format
-     *
-     * Simple validation - checks for @ symbol
-     * More complex validation could use regex
-     *
-     * @param email Email address to validate
-     * @return true if valid format, false otherwise
-     */
     private fun isValidEmail(email: String): Boolean {
         return email.contains("@")
     }
 
-    /**
-     * Validate password complexity requirements
-     *
-     * Requirements:
-     * - Minimum 8 characters
-     * - At least one digit
-     * - At least one uppercase letter
-     * - At least one lowercase letter
-     *
-     * @param password Password to validate
-     * @return null if valid, error message if invalid
-     */
     private fun validatePassword(password: String): String? {
         if (password.length < MIN_PASSWORD_LENGTH) {
             return "Password must be at least $MIN_PASSWORD_LENGTH characters"
