@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     location TEXT,
     avatar_url TEXT,
     preferences JSONB DEFAULT '{}'::JSONB,
+    email_verified BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -85,6 +86,25 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     user_agent TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Email verification column
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT FALSE;
+
+-- Migration: mark existing users as verified
+UPDATE users SET email_verified = TRUE WHERE email_verified = FALSE;
+
+-- Email verification codes (OTP)
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    attempts INT DEFAULT 0,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_codes_user ON email_verification_codes(user_id);
+CREATE INDEX IF NOT EXISTS idx_verification_codes_expires ON email_verification_codes(expires_at);
 
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner_id);

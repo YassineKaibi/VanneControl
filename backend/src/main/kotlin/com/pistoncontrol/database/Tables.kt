@@ -18,6 +18,7 @@ object Users : Table("users") {
     val preferences = jsonb("preferences").default("{}")
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
+    val emailVerified = bool("email_verified").default(false)
 
     override val primaryKey = PrimaryKey(id)
 }
@@ -94,6 +95,17 @@ object AuditLogs : Table("audit_logs") {
     val details = jsonb("details").nullable() // Additional context (old values, new values, etc.)
     val ipAddress = text("ip_address").nullable()
     val userAgent = text("user_agent").nullable()
+    val createdAt = timestamp("created_at")
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+object EmailVerificationCodes : Table("email_verification_codes") {
+    val id = uuid("id").autoGenerate()
+    val userId = uuid("user_id")
+    val codeHash = text("code_hash")
+    val attempts = integer("attempts").default(0)
+    val expiresAt = timestamp("expires_at")
     val createdAt = timestamp("created_at")
 
     override val primaryKey = PrimaryKey(id)
