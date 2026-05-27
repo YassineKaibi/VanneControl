@@ -8,6 +8,7 @@ services:
       POSTGRES_DB: piston_control
       POSTGRES_USER: piston_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: Africa/Tunis
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -29,6 +30,8 @@ services:
     container_name: piston-mosquitto
     restart: unless-stopped
     user: "1883:1883"
+    environment:
+      TZ: Africa/Tunis
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto_data:/mosquitto/data
@@ -69,7 +72,7 @@ services:
       SESSION_SIGN_KEY: ${SESSION_SIGN_KEY}
       # Avatar upload configuration
       SERVER_BASE_URL: ${SERVER_BASE_URL:-http://localhost:8080/}
-      TZ: UTC
+      TZ: Africa/Tunis
       SMTP_HOST: ${SMTP_HOST:-mailpit}
       SMTP_PORT: ${SMTP_PORT:-1025}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -133,6 +136,8 @@ services:
     image: redis:7.2-alpine
     container_name: piston-redis
     restart: unless-stopped
+    environment:
+      TZ: Africa/Tunis
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
