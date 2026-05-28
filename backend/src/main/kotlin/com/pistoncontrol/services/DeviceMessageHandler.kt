@@ -83,20 +83,23 @@ class DeviceMessageHandler {
                     "Updated piston ${payload.pistonNumber}: ${if (payload.isActive) "ACTIVE" else "INACTIVE"}" 
                 }
                 
+                // Telemetry for scheduler-triggered commands is written optimistically in
+                // ScheduleExecutor.ValveOperationJob before the MQTT command is sent, so we
+                // skip it here to avoid a duplicate row when the device acknowledges.
                 // ✅ FIX: Build proper JSON string using kotlinx.serialization
-                val jsonPayload = buildJsonObject {
-                    put("piston_number", payload.pistonNumber)
-                    put("timestamp", payload.timestamp)
-                }.toString()
-                
-                // Log telemetry event
-                Telemetry.insert {
-                    it[deviceId] = deviceUuid
-                    it[Telemetry.pistonId] = pistonUuid
-                    it[eventType] = if (payload.isActive) "activated" else "deactivated"
-                    it[Telemetry.payload] = jsonPayload  // PostgreSQL will auto-cast to JSONB
-                    it[createdAt] = Instant.ofEpochMilli(payload.timestamp)
-                }
+//                val jsonPayload = buildJsonObject {
+//                    put("piston_number", payload.pistonNumber)
+//                    put("timestamp", payload.timestamp)
+//                }.toString()
+//
+//                // Log telemetry event
+//                Telemetry.insert {
+//                    it[deviceId] = deviceUuid
+//                    it[Telemetry.pistonId] = pistonUuid
+//                    it[eventType] = if (payload.isActive) "activated" else "deactivated"
+//                    it[Telemetry.payload] = jsonPayload  // PostgreSQL will auto-cast to JSONB
+//                    it[createdAt] = Instant.ofEpochMilli(payload.timestamp)
+//                }
             }
         }
     }

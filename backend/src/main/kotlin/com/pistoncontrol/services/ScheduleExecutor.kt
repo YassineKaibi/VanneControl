@@ -1,8 +1,16 @@
 package com.pistoncontrol.services
 
+import com.pistoncontrol.database.DatabaseFactory.dbQuery
+import com.pistoncontrol.database.Pistons
+import com.pistoncontrol.database.Telemetry
 import com.pistoncontrol.mqtt.MqttManager
 import com.pistoncontrol.models.Schedule
+import com.pistoncontrol.websocket.WebSocketManager
 import mu.KotlinLogging
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.sql.update
 import org.quartz.*
 import org.quartz.impl.StdSchedulerFactory
 import kotlinx.coroutines.CoroutineScope
@@ -10,6 +18,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import java.time.Instant
+import java.util.UUID
 import org.quartz.Job as QuartzJob
 
 private val logger = KotlinLogging.logger {}
@@ -304,6 +317,74 @@ class ScheduleExecutor(
 
                 logger.info { "✅ SUCCESS: Schedule '$scheduleName' executed - sent $action command for piston $pistonNumber" }
 
+                // Update DB state optimistically so the UI reflects the change even when the
+                // device is offline and cannot send back an acknowledgment.
+                val newState = if (action.lowercase() == "activate") "active" else "inactive"
+                runBlocking {
+                    try {
+                        val deviceUuid = UUID.fromString(deviceId)
+                        val now = Instant.now()
+                        dbQuery {
+                            val existing = Pistons.select {
+                                (Pistons.deviceId eq deviceUuid) and (Pistons.pistonNumber eq pistonNumber)
+                            }.singleOrNull()
+
+                            val pistonId: UUID
+                            if (existing != null) {
+                                pistonId = existing[Pistons.id]
+                                Pistons.update({
+                                    (Pistons.deviceId eq deviceUuid) and (Pistons.pistonNumber eq pistonNumber)
+                                }) {
+                                    it[Pistons.state] = newState
+                                    it[Pistons.lastTriggered] = now
+                                }
+                            } else {
+                                pistonId = Pistons.insert {
+                                    it[Pistons.deviceId] = deviceUuid
+                                    it[Pistons.pistonNumber] = pistonNumber
+                                    it[Pistons.state] = newState
+                                    it[Pistons.lastTriggered] = now
+                                } get Pistons.id
+                            }
+
+                            val jsonPayload = buildJsonObject {
+                                put("piston_number", pistonNumber)
+                                put("timestamp", now.toEpochMilli())
+                            }.toString()
+
+                            Telemetry.insert {
+                                it[Telemetry.deviceId] = deviceUuid
+                                it[Telemetry.pistonId] = pistonId
+                                it[Telemetry.eventType] = if (newState == "active") "activated" else "deactivated"
+                                it[Telemetry.payload] = jsonPayload
+                                it[Telemetry.createdAt] = now
+                            }
+                        }
+                        logger.info { "📝 Piston $pistonNumber on device $deviceId → $newState (DB updated)" }
+                    } catch (e: Exception) {
+                        logger.error(e) { "⚠️ Failed to update DB state for scheduled piston command" }
+                    }
+                }
+
+                // Notify WebSocket clients so the app UI updates in real time.
+                val wsManager = context.scheduler.context.get("webSocketManager") as? WebSocketManager
+                if (wsManager != null) {
+                    val wsMessage = buildJsonObject {
+                        put("type", "piston_update")
+                        put("device_id", deviceId)
+                        put("piston_number", pistonNumber)
+                        put("state", newState)
+                        put("timestamp", System.currentTimeMillis())
+                    }.toString()
+                    runBlocking {
+                        try {
+                            wsManager.broadcast(wsMessage)
+                        } catch (e: Exception) {
+                            logger.error(e) { "⚠️ Failed to broadcast WebSocket update for scheduled command" }
+                        }
+                    }
+                }
+
             } catch (e: Exception) {
                 logger.error(e) {
                     "❌ FAILED to execute schedule '$scheduleName': ${e.message}\n" +
@@ -321,5 +402,13 @@ class ScheduleExecutor(
         scheduler.context.put("mqttManager", mqttManager)
         logger.info { "✅ MqttManager stored in scheduler context" }
         logger.debug { "   Scheduler context now contains: ${scheduler.context.keys.joinToString()}" }
+    }
+
+    /**
+     * Store WebSocket manager in scheduler context for job access
+     */
+    fun setWebSocketManager(wsManager: WebSocketManager) {
+        scheduler.context.put("webSocketManager", wsManager)
+        logger.info { "✅ WebSocketManager stored in scheduler context" }
     }
 }

@@ -39,6 +39,7 @@ fun Application.configureRouting(
 
     val wsManager = WebSocketManager(mqttManager)
     wsManager.startMqttForwarding()
+    scheduleExecutor.setWebSocketManager(wsManager)
 
     val userService = UserService()
 
