@@ -129,3 +129,15 @@ data class TelemetryEventResponse(
 data class TelemetryListResponse(
     val telemetry: List<TelemetryEventResponse>
 )
+
+@Serializable
+data class HistoryEventResponse(
+    val pistonNumber: Int,
+    val action: String,
+    val timestamp: String
+)
+
+@Serializable
+data class HistoryListResponse(
+    val history: List<HistoryEventResponse>
+)

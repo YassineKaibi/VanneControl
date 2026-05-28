@@ -426,5 +426,32 @@ fun Route.deviceRoutes(mqttManager: MqttManager) {
                 )
             }
         }
+
+        get("/history") {
+            try {
+                val principal = call.principal<JWTPrincipal>()!!
+                val userId = UUID.fromString(principal.payload.getClaim("userId").asString())
+
+                val pistonNumber = call.request.queryParameters["pistonNumber"]?.toIntOrNull()
+                val action = call.request.queryParameters["action"]
+                val startDate = call.request.queryParameters["startDate"]
+                val endDate = call.request.queryParameters["endDate"]
+                val limit = call.request.queryParameters["limit"]
+                    ?.toIntOrNull()?.coerceIn(1, 1000) ?: 200
+
+                when (val result = deviceService.getHistory(
+                    userId, pistonNumber, action, startDate, endDate, limit
+                )) {
+                    is DeviceService.DeviceResult.HistorySuccess ->
+                        call.respond(HttpStatusCode.OK, HistoryListResponse(result.history))
+                    is DeviceService.DeviceResult.Failure ->
+                        call.respond(HttpStatusCode.fromValue(result.statusCode), ErrorResponse(result.error))
+                    else ->
+                        call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Unexpected result"))
+                }
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.InternalServerError, ErrorResponse(e.message ?: "Unknown error"))
+            }
+        }
     }
 }

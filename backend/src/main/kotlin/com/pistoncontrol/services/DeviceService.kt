@@ -48,6 +48,7 @@ class DeviceService(private val mqttManager: MqttManager) {
         data class PistonsListSuccess(val pistons: List<PistonResponse>) : DeviceResult()
         data class DeviceStatsSuccess(val stats: DeviceStatsResponse) : DeviceResult()
         data class TelemetryListSuccess(val telemetry: List<TelemetryEventResponse>) : DeviceResult()
+        data class HistorySuccess(val history: List<HistoryEventResponse>) : DeviceResult()
         data class Failure(val error: String, val statusCode: Int = 400) : DeviceResult()
     }
 
@@ -493,5 +494,73 @@ class DeviceService(private val mqttManager: MqttManager) {
 
             DeviceResult.TelemetryListSuccess(results)
         }
+    }
+
+    suspend fun getHistory(
+        userId: UUID,
+        pistonNumber: Int? = null,
+        action: String? = null,
+        startDate: String? = null,
+        endDate: String? = null,
+        limit: Int = 200
+    ): DeviceResult {
+        return dbQuery {
+            val userDeviceIds = Devices
+                .select { Devices.ownerId eq userId }
+                .map { it[Devices.id] }
+
+            if (userDeviceIds.isEmpty()) {
+                return@dbQuery DeviceResult.HistorySuccess(emptyList())
+            }
+
+            var query = Telemetry.select {
+                (Telemetry.deviceId inList userDeviceIds) and
+                (Telemetry.eventType inList listOf("activated", "deactivated"))
+            }
+
+            if (action != null && action in listOf("activated", "deactivated")) {
+                query = query.andWhere { Telemetry.eventType eq action }
+            }
+
+            if (startDate != null) {
+                runCatching { Instant.parse(startDate) }.getOrNull()?.let { start ->
+                    query = query.andWhere { Telemetry.createdAt greaterEq start }
+                }
+            }
+            if (endDate != null) {
+                runCatching { Instant.parse(endDate) }.getOrNull()?.let { end ->
+                    query = query.andWhere { Telemetry.createdAt lessEq end }
+                }
+            }
+
+            val rows = query
+                .orderBy(Telemetry.createdAt to SortOrder.DESC)
+                .limit(limit)
+                .toList()
+
+            var events = rows.mapNotNull { row ->
+                val payloadStr = row[Telemetry.payload] ?: return@mapNotNull null
+                val pistonNum = extractPistonNumber(payloadStr) ?: return@mapNotNull null
+                HistoryEventResponse(
+                    pistonNumber = pistonNum,
+                    action = row[Telemetry.eventType],
+                    timestamp = row[Telemetry.createdAt].toString()
+                )
+            }
+
+            if (pistonNumber != null) {
+                events = events.filter { it.pistonNumber == pistonNumber }
+            }
+
+            DeviceResult.HistorySuccess(events)
+        }
+    }
+
+    private fun extractPistonNumber(payload: String): Int? {
+        return Regex(""""piston_number"\s*:\s*(\d+)""")
+            .find(payload)
+            ?.groupValues
+            ?.get(1)
+            ?.toIntOrNull()
     }
 }
