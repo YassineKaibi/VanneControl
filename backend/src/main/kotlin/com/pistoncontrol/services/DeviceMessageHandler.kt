@@ -3,6 +3,7 @@ package com.pistoncontrol.services
 import com.pistoncontrol.database.DatabaseFactory.dbQuery
 import com.pistoncontrol.database.*
 import com.pistoncontrol.mqtt.*
+import com.pistoncontrol.websocket.WebSocketManager
 import org.jetbrains.exposed.sql.*
 import java.time.Instant
 import java.util.UUID
@@ -19,14 +20,21 @@ private val logger = KotlinLogging.logger {}
  * Processes MQTT messages and persists them to PostgreSQL.
  * Uses kotlinx.serialization for JSON handling.
  */
-class DeviceMessageHandler {
-    
+class DeviceMessageHandler(private val flowFaultDetector: FlowFaultDetector) {
+
     // JSON serializer instance
-    private val json = Json { 
+    private val json = Json {
         prettyPrint = false
         ignoreUnknownKeys = true
     }
-    
+
+    // Set after routing creates it; used to push flow fault events
+    private var wsManager: WebSocketManager? = null
+
+    fun setWebSocketManager(wsManager: WebSocketManager) {
+        this.wsManager = wsManager
+    }
+
     suspend fun handleMessage(message: DeviceMessage) {
         logger.debug { "Processing ${message.messageType} from device ${message.deviceId}" }
         
@@ -36,6 +44,7 @@ class DeviceMessageHandler {
                 MessageType.STATUS_UPDATE -> handleStatusUpdate(message)
                 MessageType.TELEMETRY -> handleTelemetry(message)
                 MessageType.ERROR -> handleError(message)
+                MessageType.FLOW_READING -> handleFlowReading(message)
                 MessageType.UNKNOWN -> handleUnknown(message)
             }
         } catch (e: Exception) {
@@ -205,6 +214,107 @@ class DeviceMessageHandler {
         }
     }
     
+    /**
+     * Handle per-valve water flow readings
+     *
+     * Stores the latest flow on the piston row and runs fault detection.
+     * Fault transitions (raised or cleared) are written to telemetry so they
+     * appear in valve history, and pushed to the device's WebSocket subscribers.
+     * Individual readings are not stored in telemetry to keep the table small.
+     */
+    private suspend fun handleFlowReading(message: DeviceMessage) {
+        val payload = message.payload as? MessagePayload.FlowReading ?: return
+        val deviceUuid = UUID.fromString(message.deviceId)
+        val now = Instant.now()
+
+        // (new fault, previous fault), or null when the fault state didn't change
+        val transition = dbQuery {
+            val pistonRecord = Pistons.select {
+                (Pistons.deviceId eq deviceUuid) and
+                (Pistons.pistonNumber eq payload.pistonNumber)
+            }.singleOrNull()
+
+            val previousFault = FlowFaultDetector.Fault.fromDb(pistonRecord?.get(Pistons.fault))
+            val newFault = flowFaultDetector.evaluate(
+                deviceId = message.deviceId,
+                pistonNumber = payload.pistonNumber,
+                isActive = pistonRecord?.get(Pistons.state) == "active",
+                flowRate = payload.flowRate,
+                currentFault = previousFault,
+                stateChangedAt = pistonRecord?.get(Pistons.lastTriggered)?.toEpochMilli(),
+                now = now.toEpochMilli()
+            )
+            val faultChanged = newFault != previousFault
+
+            val pistonUuid = if (pistonRecord == null) {
+                Pistons.insert {
+                    it[deviceId] = deviceUuid
+                    it[pistonNumber] = payload.pistonNumber
+                    it[state] = "inactive"
+                    it[flowRate] = payload.flowRate
+                    it[flowUpdatedAt] = now
+                    it[fault] = newFault?.dbValue
+                    it[faultSince] = newFault?.let { now }
+                } get Pistons.id
+            } else {
+                val id = pistonRecord[Pistons.id]
+                Pistons.update({ Pistons.id eq id }) {
+                    it[flowRate] = payload.flowRate
+                    it[flowUpdatedAt] = now
+                    if (faultChanged) {
+                        it[fault] = newFault?.dbValue
+                        it[faultSince] = newFault?.let { now }
+                    }
+                }
+                id
+            }
+
+            if (!faultChanged) return@dbQuery null
+
+            val jsonPayload = buildJsonObject {
+                put("piston_number", payload.pistonNumber)
+                put("fault", (newFault ?: previousFault)?.dbValue)
+                put("flow_rate", payload.flowRate)
+                put("timestamp", now.toEpochMilli())
+            }.toString()
+
+            Telemetry.insert {
+                it[deviceId] = deviceUuid
+                it[Telemetry.pistonId] = pistonUuid
+                it[eventType] = newFault?.eventType ?: "fault_cleared"
+                it[Telemetry.payload] = jsonPayload
+                it[createdAt] = now
+            }
+
+            newFault to previousFault
+        } ?: return
+
+        val (newFault, previousFault) = transition
+        if (newFault != null) {
+            logger.warn {
+                "Valve fault on device ${message.deviceId} piston ${payload.pistonNumber}: " +
+                "${newFault.dbValue} (flow ${payload.flowRate} L/min)"
+            }
+        } else {
+            logger.info {
+                "Valve fault cleared on device ${message.deviceId} piston ${payload.pistonNumber} " +
+                "(was ${previousFault?.dbValue})"
+            }
+        }
+
+        wsManager?.sendToDevice(
+            message.deviceId,
+            buildJsonObject {
+                put("type", "valve_fault")
+                put("device_id", message.deviceId)
+                put("piston_number", payload.pistonNumber)
+                put("fault", newFault?.dbValue)  // null means the fault cleared
+                put("flow_rate", payload.flowRate)
+                put("timestamp", now.toEpochMilli())
+            }.toString()
+        )
+    }
+
     /**
      * Handle unknown message types (fallback)
      * 

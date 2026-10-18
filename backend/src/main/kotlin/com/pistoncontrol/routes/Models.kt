@@ -72,7 +72,10 @@ data class DeviceResponse(
 data class PistonResponse(
     val piston_number: Int,
     val state: String,
-    val last_triggered: String?
+    val last_triggered: String?,
+    val flow_rate: Float?,  // L/min, null until the valve's flow sensor has reported
+    val flow_updated_at: String?,
+    val fault: String?  // "no_flow", "leak", or null
 )
 
 @Serializable

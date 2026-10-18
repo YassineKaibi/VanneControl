@@ -24,6 +24,7 @@ private val logger = KotlinLogging.logger {}
  * 0x02 = Status Update
  * 0x03 = Telemetry Data
  * 0x04 = Error Report
+ * 0x05 = Flow Reading (per-valve water flow sensor, ZJ-DN32)
  */
 class BinaryProtocolParser {
     
@@ -33,7 +34,8 @@ class BinaryProtocolParser {
         const val MSG_STATUS_UPDATE: Byte = 0x02
         const val MSG_TELEMETRY: Byte = 0x03
         const val MSG_ERROR: Byte = 0x04
-        
+        const val MSG_FLOW_READING: Byte = 0x05
+
         // Protocol constants
         const val HEADER_SIZE = 1
         const val DEVICE_ID_SIZE = 16
@@ -85,6 +87,16 @@ class BinaryProtocolParser {
             override val deviceId: UUID,
             val errorCode: Int,
             val errorMessage: String
+        ) : ParsedMessage()
+
+        /**
+         * Water flow measured on a single valve's line
+         */
+        data class FlowReading(
+            override val deviceId: UUID,
+            val pistonNumber: Int,
+            val flowRate: Float,  // litres per minute
+            val timestamp: Long
         ) : ParsedMessage()
     }
     
@@ -142,6 +154,7 @@ class BinaryProtocolParser {
                 MSG_STATUS_UPDATE -> parseStatusUpdate(deviceId, payload)
                 MSG_TELEMETRY -> parseTelemetry(deviceId, payload)
                 MSG_ERROR -> parseError(deviceId, payload)
+                MSG_FLOW_READING -> parseFlowReading(deviceId, payload)
                 else -> {
                     logger.warn { "Unknown message type: 0x${messageType.toString(16)}" }
                     null
@@ -251,8 +264,44 @@ class BinaryProtocolParser {
     }
     
     /**
+     * Parse flow reading message
+     *
+     * Payload format:
+     * - Byte 0: Piston number (1-8) whose line the sensor is on
+     * - Bytes 1-4: Flow rate in L/min (float, converted from pulses by the firmware)
+     * - Bytes 5-12: Timestamp (8 bytes, long)
+     */
+    private fun parseFlowReading(deviceId: UUID, payload: ByteArray): ParsedMessage.FlowReading? {
+        if (payload.size < 13) {
+            logger.warn { "Invalid flow reading payload size: ${payload.size}" }
+            return null
+        }
+
+        val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
+        val pistonNumber = buffer.get().toInt()
+        val flowRate = buffer.float
+        val timestamp = buffer.long
+
+        if (pistonNumber !in 1..8) {
+            logger.warn { "Invalid piston number in flow reading: $pistonNumber" }
+            return null
+        }
+        if (!flowRate.isFinite() || flowRate < 0f) {
+            logger.warn { "Invalid flow rate in flow reading: $flowRate" }
+            return null
+        }
+
+        return ParsedMessage.FlowReading(
+            deviceId = deviceId,
+            pistonNumber = pistonNumber,
+            flowRate = flowRate,
+            timestamp = timestamp
+        )
+    }
+
+    /**
      * Parse error report message
-     * 
+     *
      * Payload format:
      * - Bytes 0-3: Error code (4 bytes, int)
      * - Remaining bytes: Error message (UTF-8 string)

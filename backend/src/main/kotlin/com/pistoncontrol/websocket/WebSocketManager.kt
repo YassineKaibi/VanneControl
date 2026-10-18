@@ -80,8 +80,6 @@ class WebSocketManager(private val mqttManager: MqttManager) : CoroutineScope {
     fun startMqttForwarding() {
         launch {  // Use class CoroutineScope instead of GlobalScope
             mqttManager.messageFlow.collect { message ->
-                val subscribedSessions = deviceSubscriptions[message.deviceId] ?: emptySet()
-
                 // Format message to match mobile app expectations
                 val wsMessage = when (message.payload) {
                     is MessagePayload.PistonState -> {
@@ -103,6 +101,16 @@ class WebSocketManager(private val mqttManager: MqttManager) : CoroutineScope {
                             put("timestamp", System.currentTimeMillis())
                         }.toString()
                     }
+                    is MessagePayload.FlowReading -> {
+                        val payload = message.payload as MessagePayload.FlowReading
+                        buildJsonObject {
+                            put("type", "flow_update")
+                            put("device_id", message.deviceId)
+                            put("piston_number", payload.pistonNumber)
+                            put("flow_rate", payload.flowRate)  // L/min
+                            put("timestamp", payload.timestamp)
+                        }.toString()
+                    }
                     else -> {
                         // For other message types, use generic format
                         buildJsonObject {
@@ -115,18 +123,27 @@ class WebSocketManager(private val mqttManager: MqttManager) : CoroutineScope {
                     }
                 }
 
-                subscribedSessions.forEach { sessionId ->
-                    sessions[sessionId]?.let { session ->
-                        try {
-                            session.send(Frame.Text(wsMessage))
-                        } catch (e: Exception) {
-                            logger.error(e) { "Failed to send to WebSocket session $sessionId" }
-                        }
-                    }
-                }
+                sendToDevice(message.deviceId, wsMessage)
             }
         }
         logger.info { "MQTT to WebSocket forwarding started" }
+    }
+
+    /**
+     * Send a message to the sessions subscribed to a device
+     */
+    suspend fun sendToDevice(deviceId: String, message: String) {
+        val subscribedSessions = deviceSubscriptions[deviceId] ?: emptySet()
+
+        subscribedSessions.forEach { sessionId ->
+            sessions[sessionId]?.let { session ->
+                try {
+                    session.send(Frame.Text(message))
+                } catch (e: Exception) {
+                    logger.error(e) { "Failed to send to WebSocket session $sessionId" }
+                }
+            }
+        }
     }
 
     fun shutdown() {
@@ -155,6 +172,11 @@ class WebSocketManager(private val mqttManager: MqttManager) : CoroutineScope {
             is MessagePayload.Error -> buildJsonObject {
                 put("error_code", payload.errorCode)
                 put("error_message", payload.errorMessage)
+            }
+            is MessagePayload.FlowReading -> buildJsonObject {
+                put("piston_number", payload.pistonNumber)
+                put("flow_rate", payload.flowRate)
+                put("timestamp", payload.timestamp)
             }
             is MessagePayload.Raw -> {
                 try {

@@ -78,6 +78,10 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@vannecontrol.com}
+      # Water flow sensor fault detection
+      FLOW_FAULT_GRACE_SECONDS: ${FLOW_FAULT_GRACE_SECONDS:-15}
+      FLOW_NO_FLOW_THRESHOLD_LPM: ${FLOW_NO_FLOW_THRESHOLD_LPM:-0.5}
+      FLOW_LEAK_THRESHOLD_LPM: ${FLOW_LEAK_THRESHOLD_LPM:-0.5}
     volumes:
       # Persist uploaded avatars across container restarts
       - avatar_uploads:/app/uploads
