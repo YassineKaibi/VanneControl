@@ -41,6 +41,10 @@ object Pistons : Table("pistons") {
     val pistonNumber = integer("piston_number")
     val state = text("state")
     val lastTriggered = timestamp("last_triggered").nullable()
+    val flowRate = float("flow_rate").nullable()  // L/min, latest reading from the valve's flow sensor
+    val flowUpdatedAt = timestamp("flow_updated_at").nullable()
+    val fault = text("fault").nullable()  // "no_flow" or "leak"
+    val faultSince = timestamp("fault_since").nullable()
 
     override val primaryKey = PrimaryKey(id)
 }

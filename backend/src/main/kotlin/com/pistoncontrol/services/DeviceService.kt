@@ -34,6 +34,11 @@ class DeviceService(private val mqttManager: MqttManager) {
         private const val MIN_PISTON_NUMBER = 1
         private const val MAX_PISTON_NUMBER = 8
         private const val DEFAULT_DEVICE_STATUS = "offline"
+
+        // Telemetry event types shown in valve history (valve actions + flow faults)
+        private val HISTORY_EVENT_TYPES = listOf(
+            "activated", "deactivated", "fault_no_flow", "fault_leak", "fault_cleared"
+        )
     }
 
     /**
@@ -346,7 +351,10 @@ class DeviceService(private val mqttManager: MqttManager) {
             PistonResponse(
                 piston_number = pistonNumber,
                 state = existing?.get(Pistons.state) ?: "inactive",
-                last_triggered = existing?.get(Pistons.lastTriggered)?.toString()
+                last_triggered = existing?.get(Pistons.lastTriggered)?.toString(),
+                flow_rate = existing?.get(Pistons.flowRate),
+                flow_updated_at = existing?.get(Pistons.flowUpdatedAt)?.toString(),
+                fault = existing?.get(Pistons.fault)
             )
         }
     }
@@ -515,10 +523,10 @@ class DeviceService(private val mqttManager: MqttManager) {
 
             var query = Telemetry.select {
                 (Telemetry.deviceId inList userDeviceIds) and
-                (Telemetry.eventType inList listOf("activated", "deactivated"))
+                (Telemetry.eventType inList HISTORY_EVENT_TYPES)
             }
 
-            if (action != null && action in listOf("activated", "deactivated")) {
+            if (action != null && action in HISTORY_EVENT_TYPES) {
                 query = query.andWhere { Telemetry.eventType eq action }
             }
 

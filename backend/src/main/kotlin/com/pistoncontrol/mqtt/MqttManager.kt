@@ -40,6 +40,7 @@ enum class MessageType {
     STATUS_UPDATE,
     TELEMETRY,
     ERROR,
+    FLOW_READING,
     UNKNOWN
 }
 
@@ -71,6 +72,12 @@ sealed class MessagePayload {
         val errorMessage: String
     ) : MessagePayload()
     
+    data class FlowReading(
+        val pistonNumber: Int,
+        val flowRate: Float,  // litres per minute
+        val timestamp: Long
+    ) : MessagePayload()
+
     data class Raw(
         val rawData: String
     ) : MessagePayload()
@@ -162,7 +169,7 @@ class MqttManager(
      * Detect if message is binary or JSON
      * 
      * Binary messages have these characteristics:
-     * 1. First byte is a valid message type (0x01-0x04)
+     * 1. First byte is a valid message type (0x01-0x05)
      * 2. Minimum size is 19 bytes
      * 3. Topic ends with "/binary"
      * 4. NOT starting with '{' or '[' (JSON markers)
@@ -175,7 +182,7 @@ class MqttManager(
         
         // Check message characteristics
         val firstByte = data[0]
-        val isValidMessageType = firstByte in 0x01..0x04
+        val isValidMessageType = firstByte in 0x01..0x05
         val hasMinimumSize = data.size >= BinaryProtocolParser.MIN_MESSAGE_SIZE
         val notJsonStart = data[0] != '{'.code.toByte() && data[0] != '['.code.toByte()
         
@@ -239,6 +246,19 @@ class MqttManager(
                     payload = MessagePayload.Error(
                         errorCode = parsed.errorCode,
                         errorMessage = parsed.errorMessage
+                    )
+                )
+            }
+
+            is BinaryProtocolParser.ParsedMessage.FlowReading -> {
+                DeviceMessage(
+                    deviceId = deviceId,
+                    topic = topic,
+                    messageType = MessageType.FLOW_READING,
+                    payload = MessagePayload.FlowReading(
+                        pistonNumber = parsed.pistonNumber,
+                        flowRate = parsed.flowRate,
+                        timestamp = parsed.timestamp
                     )
                 )
             }

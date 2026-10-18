@@ -106,6 +106,17 @@ CREATE TABLE IF NOT EXISTS email_verification_codes (
 CREATE INDEX IF NOT EXISTS idx_verification_codes_user ON email_verification_codes(user_id);
 CREATE INDEX IF NOT EXISTS idx_verification_codes_expires ON email_verification_codes(expires_at);
 
+-- Water flow sensor (ZJ-DN32, one per valve)
+ALTER TABLE pistons ADD COLUMN IF NOT EXISTS flow_rate REAL;
+ALTER TABLE pistons ADD COLUMN IF NOT EXISTS flow_updated_at TIMESTAMP;
+ALTER TABLE pistons ADD COLUMN IF NOT EXISTS fault TEXT CHECK (fault IN ('no_flow', 'leak'));
+ALTER TABLE pistons ADD COLUMN IF NOT EXISTS fault_since TIMESTAMP;
+
+-- Allow flow fault events in valve history
+ALTER TABLE telemetry DROP CONSTRAINT IF EXISTS telemetry_event_type_check;
+ALTER TABLE telemetry ADD CONSTRAINT telemetry_event_type_check
+    CHECK (event_type IN ('activated', 'deactivated', 'status_update', 'fault_no_flow', 'fault_leak', 'fault_cleared'));
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_devices_owner ON devices(owner_id);
 CREATE INDEX IF NOT EXISTS idx_devices_status ON devices(status);

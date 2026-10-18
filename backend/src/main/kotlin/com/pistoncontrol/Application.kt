@@ -4,6 +4,7 @@ import com.pistoncontrol.database.DatabaseFactory
 import com.pistoncontrol.mqtt.MqttManager
 import com.pistoncontrol.services.DeviceMessageHandler
 import com.pistoncontrol.services.EmailService
+import com.pistoncontrol.services.FlowFaultDetector
 import com.pistoncontrol.plugins.*
 import io.ktor.server.application.*
 import io.ktor.server.netty.*
@@ -52,7 +53,12 @@ fun Application.module() {
     // ════════════════════════════════════════════════════════════════
     // STEP 3: Initialize Device Message Handler
     // ════════════════════════════════════════════════════════════════
-    val messageHandler = DeviceMessageHandler()
+    val flowFaultDetector = FlowFaultDetector(
+        gracePeriodMillis = (System.getenv("FLOW_FAULT_GRACE_SECONDS") ?: "15").toLong() * 1000,
+        noFlowThresholdLpm = (System.getenv("FLOW_NO_FLOW_THRESHOLD_LPM") ?: "0.5").toFloat(),
+        leakThresholdLpm = (System.getenv("FLOW_LEAK_THRESHOLD_LPM") ?: "0.5").toFloat()
+    )
+    val messageHandler = DeviceMessageHandler(flowFaultDetector)
 
     // Subscribe to MQTT message flow and process messages
     GlobalScope.launch {
